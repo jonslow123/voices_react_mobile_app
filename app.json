@@ -1,7 +1,8 @@
 {
+  "name": "voices-app",
   "expo": {
-    "name": "voices-app",
     "slug": "voices-app",
+    "entryPoint": "./index.js",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
