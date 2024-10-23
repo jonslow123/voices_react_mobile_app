@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, FlatList, ActivityIndicator, StyleSheet, TouchableOpacity } from 'react-native';
 import axios from "axios";
+import { useNavigation } from '@react-navigation/native';
+
 
 const ArtistsScreen = () => {
   const [artists, setArtists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const navigation = useNavigation(); 
 
   const fetchArtist = async () => {
     try {
@@ -40,6 +43,7 @@ const ArtistsScreen = () => {
   useEffect(() => {
     fetchArtist();
   }, []);
+  
 
   if (loading) {
     return <ActivityIndicator size="large" color="#0000ff" />;
@@ -55,7 +59,10 @@ const ArtistsScreen = () => {
     const genres = [genre_1, genre_2, genre_3].filter(Boolean); // Filter out any empty genres
 
     return (
-      <View style={styles.artistItem}>
+      <TouchableOpacity
+        style={styles.artistItem}
+        onPress={() => navigation.navigate('ArtistDetail', { artistId: item._id })}
+      >
         <Text style={styles.artistName}>{dj_name}</Text>
         <View style={styles.genreContainer}>
           {genres.map((genre, index) => (
@@ -64,7 +71,7 @@ const ArtistsScreen = () => {
             </View>
           ))}
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
