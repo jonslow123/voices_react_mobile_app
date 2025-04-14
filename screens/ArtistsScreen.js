@@ -1,123 +1,220 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, ActivityIndicator, StyleSheet, TouchableOpacity } from 'react-native';
-import axios from "axios";
-import { useNavigation } from '@react-navigation/native';
+import React, { useState, useEffect } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  FlatList, 
+  Image, 
+  TouchableOpacity, 
+  ActivityIndicator,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import axios from 'axios';
+import { useRouter } from 'expo-router';
+import { usePlayer } from '../app/context/PlayerContext';
+import Constants from 'expo-constants';
 
+const BRAND_COLORS = {
+  beige: '#e5d7be',
+  black: '#131200',
+  redOrange: '#d34e24'
+};
 
-const ArtistsScreen = () => {
-  const [artists, setArtists] = useState([]);
+const ArtistsScreen = ({ navigation }) => {
+  const { handleTilePress } = usePlayer();
+  const [hosts, setHosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const navigation = useNavigation(); 
+  const router = useRouter();
 
-  const fetchArtist = async () => {
+  // Get status bar height
+  const statusBarHeight = Constants.statusBarHeight || 0;
+
+  useEffect(() => {
+    fetchHosts();
+  }, []);
+
+  const fetchHosts = async () => {
     try {
-  
-      const response = await axios.get('http://192.168.0.7:4000/api/artists', {
-        headers: {
-          'Content-Type': 'application/json',
-          'Connection': 'keep-alive'
-        }
-      });
-  
-      const data = response.data; 
-      console.log('Fetched Artist Data:', data); 
-  
-      if (data.length > 0) {
-        setArtists(response.data); 
-      } else {
-        setArtists('No artist found');
-      }
-    } catch (error) {
-      // Different ways the error object can manifest:
-      if (error.response) {
-        // Server responded with a status other than 200 range
-        console.error('Error response:', error.response.data);
-        setError(`Error: ${error.response.status} - ${error.response.data.message || 'Server Error'}`);
-      }
+      setLoading(true);
+      const response = await axios.get('https://api.mixcloud.com/VoicesRadio/hosts/');
+      console.log('Hosts fetched:', response.data.data.length);
+      setHosts(response.data.data);
+      setError(null);
+    } catch (err) {
+      console.error('Error fetching hosts:', err);
+      setError('Failed to load artists. Please try again.');
     } finally {
-       setLoading(false);
+      setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchArtist();
-  }, []);
-  
+  const navigateToArtistDetails = (host) => {
+    router.push({
+      pathname: '/(artists)/details',
+      params: {
+        username: host.username,
+        name: host.name,
+        imageUrl: host.pictures.extra_large
+      }
+    });
+  };
+
+  const renderHost = ({ item }) => (
+    <TouchableOpacity 
+      style={styles.hostCard}
+      onPress={() => navigateToArtistDetails(item)}
+    >
+      <Image 
+        source={{ uri: item.pictures.extra_large }} 
+        style={styles.hostImage}
+        resizeMode="cover"
+      />
+      <View style={styles.hostInfo}>
+        <Text style={styles.hostName}>{item.name}</Text>
+        <TouchableOpacity 
+          style={styles.viewProfileButton}
+          onPress={() => navigateToArtistDetails(item)}
+        >
+          <Text style={styles.viewProfileText}>View Profile</Text>
+          <Ionicons name="arrow-forward" size={16} color="#007AFF" />
+        </TouchableOpacity>
+      </View>
+    </TouchableOpacity>
+  );
 
   if (loading) {
-    return <ActivityIndicator size="large" color="#0000ff" />;
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Loading artists...</Text>
+      </View>
+    );
   }
 
   if (error) {
-    return <Text>Error: {error}</Text>;
+    return (
+      <View style={styles.errorContainer}>
+        <Ionicons name="alert-circle" size={48} color="#FF3B30" />
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={fetchHosts}
+        >
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
   }
 
-  // Function to render each artist item
-  const renderArtistItem = ({ item }) => {
-    const { dj_name, genre_1, genre_2, genre_3 } = item;
-    const genres = [genre_1, genre_2, genre_3].filter(Boolean); // Filter out any empty genres
-
-    return (
-      <TouchableOpacity
-        style={styles.artistItem}
-        onPress={() => navigation.navigate('ArtistDetail', { artistId: item._id })}
-      >
-        <Text style={styles.artistName}>{dj_name}</Text>
-        <View style={styles.genreContainer}>
-          {genres.map((genre, index) => (
-            <View key={index} style={styles.genreTab}>
-              <Text style={styles.genreText}>{genre}</Text>
-            </View>
-          ))}
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
   return (
-    <FlatList
-      data={artists}
-      keyExtractor={(item) => item._id}
-      renderItem={renderArtistItem}
-      contentContainerStyle={styles.listContainer}
-    />
+    <View style={styles.container}>
+      
+      <View style={styles.contentContainer}>
+        <FlatList
+          data={hosts}
+          renderItem={renderHost}
+          keyExtractor={(item) => item.key}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        />
+      </View>
+    </View>
   );
 };
 
-// Styles for the component
 const styles = StyleSheet.create({
-  listContainer: {
-    padding: 20,
+  container: {
+    flex: 1,
+    backgroundColor: BRAND_COLORS.beige, 
+    padding: 0,
+    margin: 0,
   },
-  artistItem: {
-    marginBottom: 20,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: '#ccc',
+  contentContainer: {
+    flex: 1,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    color: '#333',
+  },
+  listContent: {
+    padding: 15,
+  },
+  hostCard: {
+    flexDirection: 'row',
+    backgroundColor: 'white',
     borderRadius: 10,
-    backgroundColor: '#f9f9f9',
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
+    overflow: 'hidden',
   },
-  artistName: {
+  hostImage: {
+    width: 100,
+    height: 100,
+  },
+  hostInfo: {
+    flex: 1,
+    padding: 12,
+    justifyContent: 'space-between',
+  },
+  hostName: {
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 10,
-  },
-  genreContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  genreTab: {
-    backgroundColor: '#e0e0e0',
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  genreText: {
-    fontSize: 14,
     color: '#333',
+  },
+  viewProfileButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  viewProfileText: {
+    fontSize: 14,
+    color: '#007AFF',
+    marginRight: 4,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#666',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    padding: 16,
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 12,
+    marginBottom: 24,
+  },
+  retryButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
 
