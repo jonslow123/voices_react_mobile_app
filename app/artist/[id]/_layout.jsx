@@ -5,6 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import TopBanner from '../../../components/TopBanner';
 import MiniPlayer from '../../../components/MiniPlayer';
+import { Dimensions } from 'react-native';
+const { width, height } = Dimensions.get('window');
 
 export default function ArtistDetailLayout() {
   return (
@@ -59,6 +61,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    width: width,
+    height: height
   },
   tabBarContainer: {
     position: 'absolute',

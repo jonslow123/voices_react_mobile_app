@@ -16,15 +16,13 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import { useAuth } from './context/auth';
+import { BRAND_COLORS } from './styles/brandColors'; 
+import { Dimensions } from 'react-native';
+const { width, height } = Dimensions.get('window');
 
 const API_URL = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/users`;
 console.log(API_URL);
 
-const BRAND_COLORS = {
-  beige: '#e5d7be',
-  black: '#131200',
-  redOrange: '#d34e24'
-};
 
 export default function ChangePasswordScreen() {
   const [currentPassword, setCurrentPassword] = useState('');
@@ -104,7 +102,7 @@ export default function ChangePasswordScreen() {
               style={styles.backButton}
               onPress={() => router.back()}
             >
-              <Ionicons name="arrow-back" size={24} color={BRAND_COLORS.black} />
+              <Ionicons name="arrow-back" size={24} color={BRAND_COLORS.primaryText} />
             </TouchableOpacity>
             <Text style={styles.title}>Change Password</Text>
             <View style={styles.placeholder} />
@@ -207,7 +205,9 @@ export default function ChangePasswordScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BRAND_COLORS.beige,
+    backgroundColor: BRAND_COLORS.background,
+    width: width,
+    height: height
   },
   keyboardAvoidingView: {
     flex: 1,
@@ -228,7 +228,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 18,
     fontWeight: 'bold',
-    color: BRAND_COLORS.redOrange,
+    color: BRAND_COLORS.accent,
   },
   placeholder: {
     width: 32,
@@ -239,7 +239,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 16,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
     marginBottom: 24,
     textAlign: 'center',
   },
@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 16,
     marginBottom: 8,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
     fontWeight: '500',
   },
   passwordContainer: {
@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
     height: 50,
     paddingHorizontal: 15,
     fontSize: 16,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
   },
   eyeIcon: {
     padding: 10,
@@ -276,7 +276,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   button: {
-    backgroundColor: BRAND_COLORS.redOrange,
+    backgroundColor: BRAND_COLORS.accent,
     padding: 15,
     borderRadius: 8,
     alignItems: 'center',
@@ -285,7 +285,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   buttonText: {
-    color: BRAND_COLORS.beige,
+    color: BRAND_COLORS.background,
     fontSize: 16,
     fontWeight: '600',
   },

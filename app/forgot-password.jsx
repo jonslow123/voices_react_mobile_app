@@ -15,14 +15,12 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
+import { BRAND_COLORS } from './styles/brandColors';
+import { Dimensions } from 'react-native';
+const { width, height } = Dimensions.get('window');
 
 const API_URL = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/auth`;
 
-const BRAND_COLORS = {
-  beige: '#e5d7be',
-  black: '#131200',
-  redOrange: '#d34e24'
-};
 
 export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
@@ -39,14 +37,10 @@ export default function ForgotPasswordScreen() {
     setIsLoading(true);
 
     try {
-      // This is a placeholder for when the backend endpoint is ready
-      // Uncomment when the endpoint is available
-      // const response = await axios.post(`${API_URL}/forgot-password`, { email });
+      const response = await axios.post(`${API_URL}/forgot-password`, { email });
       
-      // For now, just simulate success
-      setTimeout(() => {
-        setResetSent(true);
-      }, 1500);
+      // The backend will always return success even if email doesn't exist (for security)
+      setResetSent(true);
       
     } catch (error) {
       let errorMessage = 'Failed to send password reset email';
@@ -82,7 +76,7 @@ export default function ForgotPasswordScreen() {
             style={styles.backButton}
             onPress={() => router.back()}
           >
-            <Ionicons name="arrow-back" size={24} color={BRAND_COLORS.black} />
+            <Ionicons name="arrow-back" size={24} color={BRAND_COLORS.primaryText} />
             <Text style={styles.backButtonText}>Back to Login</Text>
           </TouchableOpacity>
 
@@ -123,7 +117,7 @@ export default function ForgotPasswordScreen() {
               <Ionicons 
                 name="checkmark-circle" 
                 size={64} 
-                color={BRAND_COLORS.redOrange} 
+                color={BRAND_COLORS.accent} 
                 style={styles.successIcon}
               />
               <Text style={styles.successTitle}>Email Sent</Text>
@@ -148,7 +142,9 @@ export default function ForgotPasswordScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BRAND_COLORS.beige,
+    backgroundColor: BRAND_COLORS.background,
+    width: width,
+    height: height
   },
   logoContainer: {
     alignItems: 'center',
@@ -158,7 +154,7 @@ const styles = StyleSheet.create({
   logo: {
     width: 200,
     height: 120,
-    backgroundColor: BRAND_COLORS.beige,
+    backgroundColor: BRAND_COLORS.background,
   },
   formContainer: {
     width: '85%',
@@ -174,18 +170,18 @@ const styles = StyleSheet.create({
   backButtonText: {
     marginLeft: 8,
     fontSize: 16,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 16,
-    color: BRAND_COLORS.redOrange,
+    color: BRAND_COLORS.accent,
   },
   subtitle: {
     fontSize: 16,
     marginBottom: 24,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
     lineHeight: 22,
   },
   inputWrapper: {
@@ -194,7 +190,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 16,
     marginBottom: 8,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
     fontWeight: '500',
   },
   input: {
@@ -205,10 +201,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     fontSize: 16,
     backgroundColor: '#fff',
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
   },
   button: {
-    backgroundColor: BRAND_COLORS.redOrange,
+    backgroundColor: BRAND_COLORS.accent,
     padding: 15,
     borderRadius: 8,
     alignItems: 'center',
@@ -216,7 +212,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   buttonText: {
-    color: BRAND_COLORS.beige,
+    color: BRAND_COLORS.background,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -234,13 +230,13 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: 'bold',
     marginBottom: 12,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
   },
   successText: {
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 24,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
     lineHeight: 22,
   },
 }); 

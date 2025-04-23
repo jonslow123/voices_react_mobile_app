@@ -16,15 +16,13 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
+import { BRAND_COLORS } from './styles/brandColors'; 
+import { Dimensions } from 'react-native';
+const { width, height } = Dimensions.get('window');
 
 const API_URL = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/auth`;
 console.log(API_URL);
 
-const BRAND_COLORS = {
-  beige: '#e5d7be',
-  black: '#131200',
-  redOrange: '#d34e24'
-};
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState('');
@@ -307,7 +305,9 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BRAND_COLORS.beige,
+    backgroundColor: BRAND_COLORS.background,
+    width: width,
+    height: height
   },
   scrollContent: {
     flexGrow: 1,
@@ -321,7 +321,7 @@ const styles = StyleSheet.create({
   logo: {
     width: 200,
     height: 120,
-    backgroundColor: BRAND_COLORS.beige,
+    backgroundColor: BRAND_COLORS.background,
   },
   formContainer: {
     width: '85%',
@@ -334,7 +334,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 24,
     textAlign: 'center',
-    color: BRAND_COLORS.redOrange,
+    color: BRAND_COLORS.accent,
   },
   sectionTitle: {
     fontSize: 18,
@@ -356,7 +356,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 16,
     marginBottom: 8,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
     fontWeight: '500',
   },
   input: {
@@ -401,7 +401,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   button: {
-    backgroundColor: BRAND_COLORS.redOrange,
+    backgroundColor: BRAND_COLORS.accent,
     padding: 15,
     borderRadius: 8,
     alignItems: 'center',
@@ -410,7 +410,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   buttonText: {
-    color: BRAND_COLORS.beige,
+    color: BRAND_COLORS.background,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -426,7 +426,7 @@ const styles = StyleSheet.create({
     color: BRAND_COLORS.black,
   },
   loginLink: {
-    color: BRAND_COLORS.redOrange,
+    color: BRAND_COLORS.accent,
     fontWeight: '500',
   },
 }); 

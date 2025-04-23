@@ -16,14 +16,12 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
+import { BRAND_COLORS } from './styles/brandColors';
+import { Dimensions } from 'react-native';
+const { width, height } = Dimensions.get('window');
 
 const API_URL = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/auth`;
 
-const BRAND_COLORS = {
-  beige: '#e5d7be',
-  black: '#131200',
-  redOrange: '#d34e24'
-};
 
 export default function ResendVerificationScreen() {
   const [email, setEmail] = useState('');
@@ -68,7 +66,7 @@ export default function ResendVerificationScreen() {
               style={styles.backButton}
               onPress={() => router.back()}
             >
-              <Ionicons name="arrow-back" size={24} color={BRAND_COLORS.black} />
+              <Ionicons name="arrow-back" size={24} color={BRAND_COLORS.primaryText} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Resend Verification</Text>
             <View style={styles.placeholder} />
@@ -113,7 +111,7 @@ export default function ResendVerificationScreen() {
               </>
             ) : (
               <View style={styles.successContainer}>
-                <Ionicons name="mail" size={64} color={BRAND_COLORS.redOrange} />
+                <Ionicons name="mail" size={64} color={BRAND_COLORS.accent} />
                 <Text style={styles.title}>Verification Email Sent</Text>
                 <Text style={styles.message}>
                   We've sent a verification link to {email}. Please check your inbox and click the link to verify your account.
@@ -136,7 +134,9 @@ export default function ResendVerificationScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BRAND_COLORS.beige,
+    backgroundColor: BRAND_COLORS.background,
+    width: width,
+    height: height
   },
   keyboardAvoidingView: {
     flex: 1,
@@ -154,7 +154,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 18,
     fontWeight: 'bold',
-    color: BRAND_COLORS.redOrange,
+    color: BRAND_COLORS.accent,
   },
   placeholder: {
     width: 28,
@@ -173,13 +173,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
     marginBottom: 16,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
     textAlign: 'center',
     marginBottom: 32,
   },
@@ -195,10 +195,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 16,
     backgroundColor: '#fff',
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
   },
   button: {
-    backgroundColor: BRAND_COLORS.redOrange,
+    backgroundColor: BRAND_COLORS.accent,
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   buttonText: {
-    color: BRAND_COLORS.beige,
+    color: BRAND_COLORS.background,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
   },
   message: {
     fontSize: 16,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
     textAlign: 'center',
     marginVertical: 24,
   },

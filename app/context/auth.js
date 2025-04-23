@@ -1,84 +1,227 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { storeSecurely, getSecurely, removeSecurely } from '../utils/secureStorage';
+import secureApi from '../utils/api';
+import { jwtDecode } from 'jwt-decode';
 
 // Create context
-const AuthContext = createContext();
+const AuthContext = createContext(null);
 
 // Export the Provider component - make sure this is properly exported
 export function AuthProvider({ children }) {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [token, setToken] = useState(null);
-  const [userId, setUserId] = useState(null);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const refreshTimeoutRef = useRef(null);
 
-  // Load stored token on app start
+  // Load token on startup
   useEffect(() => {
-    const loadToken = async () => {
+    const initAuth = async () => {
+      setLoading(true);
       try {
-        const storedToken = await AsyncStorage.getItem('userToken');
-        const storedUserId = await AsyncStorage.getItem('userId');
+        const storedToken = await getSecurely('userToken');
+        const userData = await getSecurely('userData');
         
         if (storedToken) {
-          setToken(storedToken);
-          setUserId(storedUserId);
-          setIsLoggedIn(true);
-          console.log('Restored token from storage');
+          // Validate token before using
+          if (isTokenValid(storedToken)) {
+            setToken(storedToken);
+            setUser(userData);
+            setupTokenRefresh(storedToken);
+          } else {
+            // Only try to refresh if we had a valid token before
+            // Check if the token exists but has expired (not just missing)
+            try {
+              const decoded = jwtDecode(storedToken);
+              if (decoded && decoded.exp) {
+                // Token exists but expired, try to refresh
+                const refreshed = await refreshToken();
+                if (!refreshed) {
+                  // Clear invalid token if refresh fails
+                  await removeSecurely('userToken');
+                  await removeSecurely('userData');
+                }
+              } else {
+                // Just clear the token if it can't be decoded at all
+                await removeSecurely('userToken');
+                await removeSecurely('userData');
+              }
+            } catch (e) {
+              // Clear token if we can't even decode it
+              await removeSecurely('userToken');
+              await removeSecurely('userData');
+            }
+          }
         }
-      } catch (e) {
-        console.error('Failed to load token', e);
+      } catch (error) {
+        console.error('Auth initialization error:', error);
+        // Don't try to refresh on initialization errors
+        await removeSecurely('userToken');
+        await removeSecurely('userData');
+      } finally {
+        setLoading(false);
       }
     };
     
-    loadToken();
+    initAuth();
+    
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
   }, []);
 
-  // Function to handle login
-  const login = async (userData, authToken) => {
+  // Check if token is valid and not expired
+  const isTokenValid = (token) => {
     try {
-      await AsyncStorage.setItem('userToken', authToken);
-      await AsyncStorage.setItem('userId', userData._id);
+      if (!token) return false;
       
-      setToken(authToken);
-      setUserId(userData._id);
-      setIsLoggedIn(true);
-      console.log('Saved token to storage');
-    } catch (e) {
-      console.error('Failed to save token', e);
+      // Check if jwtDecode is available
+      if (typeof jwtDecode !== 'function') {
+        console.error('jwtDecode is not a function:', jwtDecode);
+        return false;
+      }
+      
+      const decoded = jwtDecode(token);
+      
+      // Check if decoded has the expected structure
+      if (!decoded || typeof decoded !== 'object' || !decoded.exp) {
+        console.error('Invalid token structure:', decoded);
+        return false;
+      }
+      
+      return decoded.exp * 1000 > Date.now();
+    } catch (error) {
+      console.error('Token validation error:', error);
+      return false;
     }
   };
 
-  // Function to handle logout
-  const logout = async () => {
+  // Set up automatic token refresh
+  const setupTokenRefresh = (token) => {
     try {
-      await AsyncStorage.removeItem('userToken');
-      await AsyncStorage.removeItem('userId');
+      const decoded = jwtDecode(token);
+      const expiryTime = decoded.exp * 1000; // Convert to ms
+      const timeToExpiry = expiryTime - Date.now();
       
+      // Refresh token 5 minutes before expiry
+      const refreshTime = Math.max(0, timeToExpiry - (5 * 60 * 1000));
+      
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+      
+      refreshTimeoutRef.current = setTimeout(refreshToken, refreshTime);
+    } catch (error) {
+      console.error('Error setting up token refresh:', error);
+    }
+  };
+
+  // Refresh the token
+  const refreshToken = async () => {
+    try {
+      // Call your refresh token endpoint
+      const response = await secureApi.post('/api/auth/refresh', {}, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      
+      const { token: newToken, user: newUser } = response.data;
+      
+      // Save the new token
+      await storeSecurely('userToken', newToken);
+      await storeSecurely('userData', newUser);
+      
+      // Update state
+      setToken(newToken);
+      setUser(newUser);
+      
+      // Set up refresh for the new token
+      setupTokenRefresh(newToken);
+      
+      return true;
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      // Force logout on refresh failure
+      logout();
+      return false;
+    }
+  };
+
+  // Login function
+  const login = async (credentials) => {
+    try {
+      // Only send email and password to the login endpoint
+      const loginData = {
+        email: credentials.email,
+        password: credentials.password
+      };
+      console.log(loginData);
+
+      const response = await secureApi.post('/api/auth/login', loginData);
+      
+      // Process login response
+      const { token, user } = response.data;
+      
+      // Store token and user data
+      await storeSecurely('userToken', token);
+      await storeSecurely('userData', user);
+      
+      setToken(token);
+      setUser(user);
+      
+      return true;
+    } catch (error) {
+      console.error('Login error:', error);
+      return false;
+    }
+  };
+
+  // Logout function
+  const logout = async () => {
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current);
+    }
+    
+    try {
+      // Call logout endpoint if you have one
+      if (token) {
+        await secureApi.post('/api/auth/logout', {}, {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }).catch(err => console.log('Logout request error:', err));
+      }
+    } finally {
+      // Clear stored data regardless of logout API response
+      await removeSecurely('userToken');
+      await removeSecurely('userData');
       setToken(null);
-      setUserId(null);
-      setIsLoggedIn(false);
-      console.log('Cleared token from storage');
-    } catch (e) {
-      console.error('Failed to remove token', e);
+      setUser(null);
     }
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      isLoggedIn, 
-      setIsLoggedIn,
-      token,
-      userId,
-      login,
-      logout
-    }}>
+    <AuthContext.Provider
+      value={{
+        token,
+        user,
+        isLoggedIn: !!token,
+        login,
+        logout,
+        refreshToken,
+        loading
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
 }
 
 // Hook for using the context
-export function useAuth() {
-  return useContext(AuthContext);
-}
+export const useAuth = () => useContext(AuthContext);
 
 // Also export as default
 export default AuthProvider; 

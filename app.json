@@ -58,17 +58,26 @@
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
-    "plugins": [
-      "expo-router",
-      "expo-font"
-    ],
     "experiments": {
       "typedRoutes": true
     },
     "newArchEnabled": true,
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#ffffff",
+          "sounds": [
+            "./assets/notification-sound.wav"
+          ]
+        }
+      ]
+    ],
+    "owner": "jonslow10",
     "extra": {
       "eas": {
-        "projectId": "your-project-id"
+        "projectId": "08fa2afe-af78-4e89-9035-d4d155cdfb66"
       }
     }
   }

@@ -6,19 +6,18 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Image,
-  SafeAreaView
+  SafeAreaView,
+  Dimensions
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
+import { BRAND_COLORS } from './styles/brandColors';
+const { width, height } = Dimensions.get('window');
 
 const API_URL = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/auth`;
 
-const BRAND_COLORS = {
-  beige: '#e5d7be',
-  black: '#131200',
-  redOrange: '#d34e24'
-};
+
 
 export default function VerifyEmailScreen() {
   const { token } = useLocalSearchParams();
@@ -64,12 +63,12 @@ export default function VerifyEmailScreen() {
         
         {verifying ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={BRAND_COLORS.redOrange} />
+            <ActivityIndicator size="large" color={BRAND_COLORS.accent} />
             <Text style={styles.loadingText}>Verifying your email...</Text>
           </View>
         ) : verified ? (
           <View style={styles.successContainer}>
-            <Ionicons name="checkmark-circle" size={80} color={BRAND_COLORS.redOrange} />
+            <Ionicons name="checkmark-circle" size={80} color={BRAND_COLORS.accent} />
             <Text style={styles.title}>Email Verified!</Text>
             <Text style={styles.message}>
               Your email has been successfully verified. You can now log in to your account.
@@ -83,7 +82,7 @@ export default function VerifyEmailScreen() {
           </View>
         ) : (
           <View style={styles.errorContainer}>
-            <Ionicons name="close-circle" size={80} color={BRAND_COLORS.redOrange} />
+            <Ionicons name="close-circle" size={80} color={BRAND_COLORS.accent} />
             <Text style={styles.title}>Verification Failed</Text>
             <Text style={styles.errorMessage}>{error}</Text>
             <Text style={styles.message}>
@@ -105,7 +104,9 @@ export default function VerifyEmailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BRAND_COLORS.beige,
+    backgroundColor: BRAND_COLORS.background,
+    width: width,
+    height: height
   },
   content: {
     flex: 1,
@@ -124,7 +125,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
   },
   successContainer: {
     alignItems: 'center',
@@ -135,30 +136,30 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
     marginTop: 24,
     marginBottom: 16,
   },
   message: {
     fontSize: 16,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
     textAlign: 'center',
     marginBottom: 32,
   },
   errorMessage: {
     fontSize: 16,
-    color: BRAND_COLORS.redOrange,
+    color: BRAND_COLORS.accent,
     textAlign: 'center',
     marginBottom: 16,
   },
   button: {
-    backgroundColor: BRAND_COLORS.redOrange,
+    backgroundColor: BRAND_COLORS.accent,
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
   },
   buttonText: {
-    color: BRAND_COLORS.beige,
+    color: BRAND_COLORS.background,
     fontSize: 16,
     fontWeight: '600',
   },

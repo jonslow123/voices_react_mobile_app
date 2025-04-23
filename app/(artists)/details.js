@@ -8,52 +8,149 @@ import {
   ActivityIndicator,
   ScrollView,
   SafeAreaView,
-  Platform
+  Platform,
+  Alert,
+  Dimensions
 } from 'react-native';
+import { getValidToken } from '../utils/tokenManager';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
-import { useLocalSearchParams, useRouter, Link } from 'expo-router';
+import { useLocalSearchParams, useRouter, Link, useFocusEffect } from 'expo-router';
 import Constants from 'expo-constants';
 import TopBanner from '../../components/TopBanner';
 import { usePlayer } from '../context/PlayerContext';
-
-const BRAND_COLORS = {
-  beige: '#e5d7be',
-  black: '#131200',
-  redOrange: '#d34e24'
-};
-
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BRAND_COLORS } from '../styles/brandColors';
+import secureApi from '../../app/utils/api';
+const { width, height } = Dimensions.get('window');
 const ArtistDetailsScreen = () => {
   const { username, name, imageUrl } = useLocalSearchParams();
   const router = useRouter();
   const [shows, setShows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const { 
-    handleTilePress, 
-    activeTileIndex,
-  } = usePlayer();
+  const { handleTilePress, activeTileId, isPlaying } = usePlayer();
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [checkingSubscription, setCheckingSubscription] = useState(true);
+  const [subscribing, setSubscribing] = useState(false);
+
   
   // Get status bar height
   const statusBarHeight = Constants.statusBarHeight || 0;
 
-  useEffect(() => {
-    fetchArtistShows();
-  }, [username]);
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchArtistShows();
+      checkSubscriptionStatus();
+    }, [username])
+  );
 
   const fetchArtistShows = async () => {
     try {
       setLoading(true);
-      // Get the shows for this artist from Mixcloud API
-      const response = await axios.get(`https://api.mixcloud.com/VoicesRadio/hosts/${username}`);
-      console.log('Shows fetched:', response.data.data.length);
+      const response = await secureApi.get(`https://api.mixcloud.com/VoicesRadio/hosts/${username}`);
       setShows(response.data.data);
       setError(null);
     } catch (err) {
-      console.error('Error fetching shows:', err);
       setError('Failed to load shows. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const checkSubscriptionStatus = async () => {
+    try {
+      console.log('Checking subscription status for artist:', username);
+      setCheckingSubscription(true);
+      
+      // Use getValidToken instead of AsyncStorage.getItem
+      const token = await getValidToken();
+      
+      if (!token) {
+        console.log('No valid token available');
+        setCheckingSubscription(false);
+        return;
+      }
+  
+      const response = await axios.get(
+        `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/users/me`,
+        {
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      
+      // Flatten the nested arrays and check if the username exists
+      const subscribedArtists = response.data.artistsSubscribed.flat();
+      console.log('Flattened subscribed artists:', subscribedArtists);
+      
+      const isArtistSubscribed = subscribedArtists.includes(username);
+      console.log('Is artist subscribed?:', isArtistSubscribed);
+  
+      setIsSubscribed(isArtistSubscribed);
+    } catch (error) {
+      console.error('Error checking subscription status:', error);
+      
+      // Check if it's an authentication error
+      if (error.response?.status === 401) {
+        router.replace('/login');
+      }
+    } finally {
+      setCheckingSubscription(false);
+    }
+  };
+  
+  // Update the handleSubscribe function
+  const handleSubscribe = async () => {
+    try {
+      setSubscribing(true);
+      
+      // Use getValidToken instead of AsyncStorage.getItem
+      const token = await getValidToken();
+      
+      if (!token) {
+        Alert.alert('Login Required', 'Please log in to subscribe to artists');
+        router.replace('/login');
+        return;
+      }
+  
+      const endpoint = isSubscribed ? 'unsubscribe' : 'subscribe';
+      const response = await axios.post(
+        `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/users/${endpoint}/${username}`,
+        {},
+        { 
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          } 
+        }
+      );
+      
+      console.log(`${endpoint} response:`, response.data);
+      
+      // Update the subscription status
+      setIsSubscribed(!isSubscribed);
+    } catch (error) {
+      console.error('Error updating subscription:', error);
+      
+      // Check if it's an authentication error
+      if (error.response?.status === 401) {
+        Alert.alert(
+          'Session Expired',
+          'Your session has expired. Please log in again.',
+          [{ text: 'OK', onPress: () => router.replace('/login') }]
+        );
+        return;
+      }
+      
+      Alert.alert(
+        'Error',
+        error.response?.data?.message || 'Failed to update subscription'
+      );
+    } finally {
+      setSubscribing(false);
     }
   };
 
@@ -70,9 +167,12 @@ const ArtistDetailsScreen = () => {
     router.push('/(tabs)/artists');
   };
 
+  const handleTabPress = (tabName) => {
+    router.push(`/(tabs)/${tabName}`);
+  };
+
   return (
     <View style={styles.container}>
-      {/* TopBanner with padding */}
       <SafeAreaView style={{
         backgroundColor: 'black',
         paddingTop: Platform.OS === 'ios' ? statusBarHeight : 0,
@@ -84,23 +184,44 @@ const ArtistDetailsScreen = () => {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Back button */}
-        <TouchableOpacity 
-          style={styles.backButton} 
-          onPress={handleBack}
-        >
-          <Ionicons name="arrow-back" size={24} color="#333" />
-        </TouchableOpacity>
-        
-        {/* Artist profile content */}
-        <View style={styles.profileHeader}>
-          <Image 
-            source={{ uri: imageUrl }} 
-            style={styles.profileImage}
-            resizeMode="cover"
-          />
-          <View style={styles.profileTextContainer}>
+        <View style={styles.headerSection}>
+          <TouchableOpacity 
+            style={styles.backButton} 
+            onPress={handleBack}
+          >
+            <Ionicons name="arrow-back" size={24} color={BRAND_COLORS.primaryText} />
+          </TouchableOpacity>
+          
+          <View style={styles.profileSection}>
+            <Image 
+              source={{ uri: imageUrl }} 
+              style={styles.profileImage}
+              resizeMode="cover"
+            />
+            
             <Text style={styles.profileName}>{name}</Text>
+            
+            {!checkingSubscription && (
+              <TouchableOpacity 
+                style={[
+                  styles.subscribeButton,
+                  isSubscribed && styles.subscribedButton
+                ]}
+                onPress={handleSubscribe}
+              >
+                <Ionicons 
+                  name={isSubscribed ? "heart" : "heart-outline"} 
+                  size={20} 
+                  color={isSubscribed ? BRAND_COLORS.background : BRAND_COLORS.accent} 
+                />
+                <Text style={[
+                  styles.subscribeText,
+                  isSubscribed && styles.subscribedText
+                ]}>
+                  {isSubscribed ? 'Subscribed' : 'Subscribe'}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
         
@@ -138,11 +259,6 @@ const ArtistDetailsScreen = () => {
                 iframeUrl: `https://player-widget.mixcloud.com/widget/iframe/?hide_cover=1&mini=1&light=1&feed=${encodeURIComponent(show.key)}`
               };
 
-              console.log('Details Screen - Playing URL:', {
-                title: tileData.title,
-                iframeUrl: tileData.iframeUrl
-              });
-
               return (
                 <TouchableOpacity 
                   key={show.key}
@@ -161,14 +277,6 @@ const ArtistDetailsScreen = () => {
                       style={styles.playButton}
                       onPress={() => handleTilePress(tileData, index)}
                     >
-                      <Ionicons 
-                        name={activeTileIndex === index ? "pause-circle" : "play-circle"} 
-                        size={24} 
-                        color="#007AFF" 
-                      />
-                      <Text style={styles.playButtonText}>
-                        {activeTileIndex === index ? "Pause" : "Play"}
-                      </Text>
                     </TouchableOpacity>
                   </View>
                 </TouchableOpacity>
@@ -177,26 +285,38 @@ const ArtistDetailsScreen = () => {
           </View>
         )}
       </ScrollView>
-      
+
       <View style={styles.tabBar}>
         <Link href="/(tabs)/" asChild>
           <TouchableOpacity style={styles.tabItem}>
-            <Ionicons name="home" size={24} color="#8E8E93" />
-            <Text style={[styles.tabLabel, styles.tabLabelInactive]}>Home</Text>
+            <Ionicons 
+              name="home"
+              size={24}
+              color="#8E8E93"
+            />
+            <Text style={styles.tabLabel}>Home</Text>
           </TouchableOpacity>
         </Link>
         
         <Link href="/(tabs)/artists" asChild>
           <TouchableOpacity style={styles.tabItem}>
-            <Ionicons name="people" size={24} color="#007AFF" />
-            <Text style={[styles.tabLabel, styles.tabLabelActive]}>Artists</Text>
+            <Ionicons 
+              name="people"
+              size={24}
+              color={BRAND_COLORS.accent}
+            />
+            <Text style={[styles.tabLabel, styles.activeTabLabel]}>Artists</Text>
           </TouchableOpacity>
         </Link>
         
-        <Link href="/(tabs)/membership" asChild>
+        <Link href="/(tabs)/settings" asChild>
           <TouchableOpacity style={styles.tabItem}>
-            <Ionicons name="card" size={24} color="#8E8E93" />
-            <Text style={[styles.tabLabel, styles.tabLabelInactive]}>Membership</Text>
+            <Ionicons 
+              name="cog"
+              size={24}
+              color="#8E8E93"
+            />
+            <Text style={styles.tabLabel}>Settings</Text>
           </TouchableOpacity>
         </Link>
       </View>
@@ -207,43 +327,45 @@ const ArtistDetailsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BRAND_COLORS.beige,
+    backgroundColor: BRAND_COLORS.background,
+    width: width,
+    height: height
+  },
+  headerSection: {
+    width: '100%',
+    marginBottom: 20,
+    position: 'relative',
   },
   backButton: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
     padding: 12,
-    alignSelf: 'flex-start',
+    zIndex: 10,  // Ensure it's above other content
+  },
+  profileSection: {
+    width: '100%',
+    alignItems: 'center',
+    paddingTop: 10,
     marginBottom: 10,
   },
-  scrollContent: {
-    padding: 16,
-    paddingTop: 20, // Add padding at the top for content
-  },
-  profileHeader: {
-    alignItems: 'center',
-    marginBottom: 24,
-    width: '100%',
-  },
   profileImage: {
-    width: 150,
-    height: 150,
-    borderRadius: 50,
+    width: 120,  // Larger size since it's the main profile image
+    height: 120,
+    borderRadius: 60,
     marginBottom: 16,
-  },
-  profileTextContainer: {
-    alignItems: 'center',
-    width: '100%',
   },
   profileName: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
+    color: BRAND_COLORS.primaryText,
     textAlign: 'center',
   },
   sectionTitle: {
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 16,
-    color: '#333',
+    color: BRAND_COLORS.primaryText,
   },
   loadingContainer: {
     flex: 1,
@@ -337,35 +459,65 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     marginLeft: 8,
   },
+  subscribeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: BRAND_COLORS.accent,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginTop: 12,
+  },
+  subscribedButton: {
+    backgroundColor: BRAND_COLORS.accent,
+    borderColor: BRAND_COLORS.accent,
+  },
+  subscribeText: {
+    marginLeft: 6,
+    fontSize: 16,
+    color: BRAND_COLORS.accent,
+    fontWeight: '600',
+  },
+  subscribedText: {
+    color: BRAND_COLORS.background,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingTop: 20, // Add padding at the top for content
+    paddingBottom: Platform.OS === 'ios' ? 100 : 80, // Add padding for tab bar
+  },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: 'white',
+    backgroundColor: BRAND_COLORS.background,
     height: Platform.OS === 'ios' ? 80 : 60,
     paddingBottom: Platform.OS === 'ios' ? 25 : 10,
-    paddingTop: 5,
+    paddingTop: 15,
+    borderTopWidth: 0,
+    elevation: 0,
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    borderTopWidth: 0,
-    elevation: 0,
+    justifyContent: 'space-around',
+    alignItems: 'center',
   },
   tabItem: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    height: '100%',
     marginTop: 5,
   },
   tabLabel: {
-    fontSize: 10,
-    marginTop: 4,
+    fontSize: 11,
     marginBottom: Platform.OS === 'ios' ? 8 : 5,
-  },
-  tabLabelActive: {
-    color: '#007AFF',
-  },
-  tabLabelInactive: {
     color: '#8E8E93',
+  },
+  activeTabLabel: {
+    color: BRAND_COLORS.accent,
+    fontWeight: '500',
   },
 });
 

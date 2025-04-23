@@ -1,4 +1,4 @@
-import React from 'react';
+/*import React from 'react';
 import { usePlayer } from '../context/PlayerContext';
 import MembershipScreen from '../../screens/MembershipScreen';
 import { BRAND_COLORS } from '../styles/brandColors';
@@ -7,17 +7,17 @@ import { StyleSheet } from 'react-native';
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: BRAND_COLORS.beige,
+    backgroundColor: BRAND_COLORS.background,
   },
   container: {
     flex: 1,
-    backgroundColor: BRAND_COLORS.beige,
+    backgroundColor: BRAND_COLORS.background,
     padding: 16,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: BRAND_COLORS.redOrange,
+    color: BRAND_COLORS.accent,
     marginBottom: 24,
   },
   membershipCard: {
@@ -25,7 +25,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 20,
     marginBottom: 16,
-    shadowColor: BRAND_COLORS.black,
+    shadowColor: BRAND_COLORS.primaryText,
     shadowOffset: {
       width: 0,
       height: 2,
@@ -37,12 +37,12 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: BRAND_COLORS.redOrange,
+    color: BRAND_COLORS.accent,
     marginBottom: 8,
   },
   cardDescription: {
     fontSize: 16,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
     opacity: 0.8,
     lineHeight: 24,
     marginBottom: 16,
@@ -50,30 +50,30 @@ const styles = StyleSheet.create({
   price: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
     marginBottom: 16,
   },
   button: {
-    backgroundColor: BRAND_COLORS.redOrange,
+    backgroundColor: BRAND_COLORS.accent,
     padding: 16,
     borderRadius: 8,
     alignItems: 'center',
   },
   buttonText: {
-    color: BRAND_COLORS.beige,
+    color: BRAND_COLORS.background,
     fontSize: 16,
     fontWeight: 'bold',
   },
   tabBar: {
-    backgroundColor: BRAND_COLORS.beige,
+    backgroundColor: BRAND_COLORS.background,
     borderTopWidth: 1,
     borderTopColor: 'rgba(19, 18, 0, 0.1)',
   },
   tabLabelActive: {
-    color: BRAND_COLORS.redOrange,
+    color: BRAND_COLORS.accent,
   },
   tabLabelInactive: {
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
   }
 });
 
@@ -81,3 +81,4 @@ export default function MembershipScreenTab() {
   const { handleTilePress } = usePlayer();
   return <MembershipScreen />
 } 
+*/

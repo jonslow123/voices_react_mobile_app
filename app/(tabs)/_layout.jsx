@@ -5,6 +5,9 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import TopBanner from '../../components/TopBanner';
 import MiniPlayer from '../../components/MiniPlayer';
+import { BRAND_COLORS } from '../styles/brandColors';
+import { Dimensions } from 'react-native';
+const { width, height } = Dimensions.get('window');
 
 export default function TabLayout() {
   // Get status bar height for proper padding
@@ -31,20 +34,20 @@ export default function TabLayout() {
       <Tabs
         screenOptions={{
           headerShown: false,
-          tabBarActiveTintColor: '#007AFF',
+          tabBarActiveTintColor: BRAND_COLORS.accent,
           tabBarStyle: {
-            height: Platform.OS === 'ios' ? 80 : 60, // Taller tab bar
-            paddingBottom: Platform.OS === 'ios' ? 25 : 10, // Extra padding at bottom
-            paddingTop: 5, // Padding at top to push icons up a bit
-            // Make sure there are no borders or shadows
+            height: Platform.OS === 'ios' ? 80 : 60, 
+            paddingBottom: Platform.OS === 'ios' ? 25 : 10,
+            paddingTop: 5,
             borderTopWidth: 0,
             elevation: 0,
+            backgroundColor: BRAND_COLORS.background,
           },
           tabBarLabelStyle: {
-            marginBottom: Platform.OS === 'ios' ? 8 : 5, // Move labels up
+            marginBottom: Platform.OS === 'ios' ? 8 : 5, 
           },
           tabBarIconStyle: {
-            marginTop: 5, // Move icons up
+            marginTop: 5, 
           }
         }}
       >
@@ -58,19 +61,18 @@ export default function TabLayout() {
         <Tabs.Screen
           name="artists"
           options={{
-            title: 'Artists',
-            tabBarIcon: ({ color }) => <Ionicons name="people" size={24} color={color} />,
+            title: 'Explore',
+            tabBarIcon: ({ color }) => <Ionicons name="search" size={24} color={color} />,
           }}
         />
         <Tabs.Screen
-          name="membership"
+          name="settings"
           options={{
-            title: 'Membership',
-            tabBarIcon: ({ color }) => <Ionicons name="card" size={24} color={color} />,
+            title: 'Settings',
+            tabBarIcon: ({ color }) => <Ionicons name="cog" size={24} color={color} />,
           }}
         />
       </Tabs>
-      
       <MiniPlayer />
     </View>
   );
@@ -79,6 +81,8 @@ export default function TabLayout() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: BRAND_COLORS.background,
+    width: width,
+    height: height
   },
 }); 

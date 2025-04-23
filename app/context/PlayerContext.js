@@ -1,11 +1,14 @@
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
 import { Audio } from 'expo-av';
+import { Alert } from 'react-native';
+import { fetchWithCache } from '../utils/apiCache';
 
 const PlayerContext = createContext(null);
 
 export function PlayerContextProvider({ children }) {
   const [currentTrack, setCurrentTrack] = useState(null);
   const [activeTileIndex, setActiveTileIndex] = useState(null);
+  const [activeTileId, setActiveTileId] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [miniPlayerVisible, setMiniPlayerVisible] = useState(false);
   const [currentPlayingUrl, setCurrentPlayingUrl] = useState('');
@@ -15,11 +18,28 @@ export function PlayerContextProvider({ children }) {
   const [isLoadingHeader, setIsLoadingHeader] = useState(false);
   const [liveInfo, setLiveInfo] = useState({ current: { title: 'Voices Radio' } });
   const headerAudioRef = useRef(new Audio.Sound());
+  const webViewRef = useRef(null);
 
   // Fetch live info on component mount
   useEffect(() => {
+    // Set up audio mode to ignore silent switch
+    const setupAudio = async () => {
+      await Audio.setAudioModeAsync({
+        playsInSilentModeIOS: true,
+        allowsRecordingIOS: false,
+        staysActiveInBackground: true,
+        interruptionModeIOS: 1,      // Use numeric value instead of constant
+        shouldDuckAndroid: true,
+        interruptionModeAndroid: 1,   // Use numeric value instead of constant
+        playThroughEarpieceAndroid: false
+      });
+    };
+    
+    setupAudio();
     fetchLiveInfo();
-    const interval = setInterval(fetchLiveInfo, 30000); // Update every 30 seconds
+    const interval = setInterval(fetchLiveInfo, 60000); // Update every minute
+    preloadCommonData();
+    
     return () => {
       clearInterval(interval);
       unloadHeaderAudio();
@@ -74,15 +94,36 @@ export function PlayerContextProvider({ children }) {
   // Helper function to unload header audio with error handling
   const unloadHeaderAudio = async () => {
     try {
-      const status = await headerAudioRef.current.getStatusAsync();
+      // First check if the sound is loaded
+      let status;
+      try {
+        status = await headerAudioRef.current.getStatusAsync();
+      } catch (statusError) {
+        // If we can't get status, recreate the Sound object
+        headerAudioRef.current = new Audio.Sound();
+        return;
+      }
       
-      // Only attempt to stop if the sound is loaded
+      // Only attempt to stop and unload if the sound is loaded
       if (status.isLoaded) {
-        await headerAudioRef.current.stopAsync();
-        await headerAudioRef.current.unloadAsync();
+        try {
+          await headerAudioRef.current.stopAsync();
+        } catch (stopError) {
+          console.log('Stop error (non-critical):', stopError);
+        }
+        
+        try {
+          await headerAudioRef.current.unloadAsync();
+        } catch (unloadError) {
+          console.log('Unload error, recreating Sound object:', unloadError);
+          // If unloading fails, create a new Sound object
+          headerAudioRef.current = new Audio.Sound();
+        }
       }
     } catch (error) {
-      // Reset state even if there's an error
+      console.log('Error in unloadHeaderAudio:', error);
+      // Reset state and recreate Sound object if anything goes wrong
+      headerAudioRef.current = new Audio.Sound();
       setIsHeaderPlaying(false);
       setIsLoadingHeader(false);
     }
@@ -91,45 +132,90 @@ export function PlayerContextProvider({ children }) {
   // Function to play/pause header audio
   const toggleHeaderSound = async () => {
     try {
+      if (miniPlayerVisible) {
+        // Stop mini player if it's visible
+        stopPlayback();
+      }
+      
       setIsLoadingHeader(true);
       
-      // If header is already playing, stop it
-      if (isHeaderPlaying) {
-        await unloadHeaderAudio();
-        setIsHeaderPlaying(false);
-      } else {
-        // If Mixcloud player is playing, stop it first
-        if (miniPlayerVisible) {
-          setMiniPlayerVisible(false); 
-          setIsPlaying(false);        
-          setActiveTileIndex(null);   
-        }
-        
-        // Load and play header audio
+      // Toggle the playing state
+      const newPlayingState = !isHeaderPlaying;
+      setIsHeaderPlaying(newPlayingState);
+      
+      // Implement logic to play/pause the header stream
+      if (newPlayingState) {
+        // Play the stream
         try {
-          const status = await headerAudioRef.current.getStatusAsync();
+          // Ensure audio is properly unloaded first
+          await unloadHeaderAudio();
           
-          // Unload if it's already loaded
-          if (status.isLoaded) {
-            await headerAudioRef.current.unloadAsync();
+          // Set audio mode to ignore silent switch
+          await Audio.setAudioModeAsync({
+            playsInSilentModeIOS: true,
+            allowsRecordingIOS: false,
+            staysActiveInBackground: true,
+            interruptionModeIOS: 1,      // Use numeric value instead of constant
+            shouldDuckAndroid: true,
+            interruptionModeAndroid: 1,   // Use numeric value instead of constant
+            playThroughEarpieceAndroid: false
+          });
+          
+          // Check if the Sound object is in a valid state
+          let needsNewSoundObject = false;
+          try {
+            const status = await headerAudioRef.current.getStatusAsync();
+            if (status.isLoaded) {
+              // Sound is still loaded despite unload attempt
+              needsNewSoundObject = true;
+            }
+          } catch (statusError) {
+            // If we can't get status, we need a new Sound object
+            needsNewSoundObject = true;
           }
-        } catch (statusError) {
-          // Ignore status errors, just continue to load
-          console.log('Status check error, continuing to load:', statusError);
+          
+          // Create a new Sound object if needed
+          if (needsNewSoundObject) {
+            headerAudioRef.current = new Audio.Sound();
+          }
+          
+          // Load and play the stream
+          await headerAudioRef.current.loadAsync(
+            { uri: 'https://voicesradio.out.airtime.pro/voicesradio_a' },
+            { shouldPlay: true, volume: 1.0 }
+          );
+          
+          // Ensure playback started
+          await headerAudioRef.current.playAsync();
+          console.log('Started playing radio stream');
+        } catch (error) {
+          console.error('Error playing radio stream:', error);
+          setIsHeaderPlaying(false);
+          
+          // Try to recover by recreating the Sound object
+          try {
+            headerAudioRef.current = new Audio.Sound();
+          } catch (recoveryError) {
+            console.error('Failed to recover Sound object:', recoveryError);
+          }
+          
+          Alert.alert('Playback Error', 'Unable to play the radio stream. Please try again later.');
         }
-        
-        // Create a new Sound instance for more reliability
-        headerAudioRef.current = new Audio.Sound();
-        
-        await headerAudioRef.current.loadAsync({ 
-          uri: 'https://voicesradio.out.airtime.pro/voicesradio_a'
-        });
-        await headerAudioRef.current.playAsync();
-        setIsHeaderPlaying(true);
+      } else {
+        // Pause/stop the stream
+        await unloadHeaderAudio();
+        console.log('Stopped radio stream');
       }
     } catch (error) {
-      console.error('Error toggling header sound:', error);
+      console.error('Error in toggleHeaderSound:', error);
       setIsHeaderPlaying(false);
+      
+      // Try to recover by recreating the Sound object
+      try {
+        headerAudioRef.current = new Audio.Sound();
+      } catch (recoveryError) {
+        console.error('Failed to recover Sound object:', recoveryError);
+      }
     } finally {
       setIsLoadingHeader(false);
     }
@@ -143,29 +229,49 @@ export function PlayerContextProvider({ children }) {
         headerAudioRef.current.unloadAsync();
       } catch (error) {
         console.log('Cleanup error (can be ignored):', error);
+        // Create a new Sound object to ensure clean state
+        headerAudioRef.current = new Audio.Sound();
       }
     };
   }, []);
 
   // Function to handle tile press from any screen
   const handleTilePress = (item, index) => {
-    // If pressing currently playing track, just toggle play state
+    // Check if the same track is already playing
     if (currentTrack && currentTrack._id === item._id) {
-      setMiniPlayerVisible(!miniPlayerVisible);
-      return;
+      // Toggle play/pause if it's the same track
+      togglePlayback();
+    } else {
+      // Start playing a new track
+      setCurrentTrack(item);
+      setActiveTileIndex(index);
+      setActiveTileId(item._id);
+      setMiniPlayerVisible(true);
+      setCurrentPlayingUrl(item.iframeUrl);
+      setIsPlaying(true);
+      
+      // Stop header sound if it's playing
+      if (isHeaderPlaying) {
+        setIsHeaderPlaying(false);
+      }
     }
+  };
 
-    // If header is playing, stop it
-    if (isHeaderPlaying) {
-      unloadHeaderAudio();
-      setIsHeaderPlaying(false);
+  // Toggle play/pause state
+  const togglePlayback = () => {
+    const newPlayingState = !isPlaying;
+    setIsPlaying(newPlayingState);
+    
+    // Send message to WebView to control playback
+    if (webViewRef.current) {
+      const message = newPlayingState ? 'play' : 'pause';
+      webViewRef.current.postMessage(message);
     }
+  };
 
-    // Set new track
-    setCurrentTrack(item);
-    setActiveTileIndex(index);
-    setMiniPlayerVisible(true);
-    setCurrentPlayingUrl(`https://player-widget.mixcloud.com/widget/iframe/?hide_cover=1&mini=1&light=1&feed=${encodeURIComponent(item.key)}`);
+  // Handle play state changes from the WebView
+  const handleWebViewPlayStateChange = (isPlaying) => {
+    setIsPlaying(isPlaying);
   };
 
   // Stop playback
@@ -173,6 +279,9 @@ export function PlayerContextProvider({ children }) {
     setIsPlaying(false);
     setMiniPlayerVisible(false);
     setActiveTileIndex(null);
+    setActiveTileId(null);
+    setCurrentTrack(null);
+    setCurrentPlayingUrl('');
   };
 
   // Add a method to handle navigation
@@ -183,16 +292,31 @@ export function PlayerContextProvider({ children }) {
     }
   };
 
+  const preloadCommonData = async () => {
+    try {
+      // Preload top hosts in background
+      fetchWithCache('https://api.mixcloud.com/VoicesRadio/hosts/?limit=5');
+      
+      // Preload featured or trending shows
+      fetchWithCache('https://api.mixcloud.com/VoicesRadio/cloudcasts/?limit=5');
+    } catch (error) {
+      console.log('Preload error:', error);
+    }
+  };
+
   return (
     <PlayerContext.Provider value={{
       // MixCloud Player context
       currentTrack,
       activeTileIndex,
+      activeTileId,
       isPlaying,
       miniPlayerVisible,
       currentPlayingUrl,
       handleTilePress,
       stopPlayback,
+      togglePlayback,
+      handleWebViewPlayStateChange,
       
       // Top Banner Radio context
       isHeaderPlaying,
@@ -200,6 +324,7 @@ export function PlayerContextProvider({ children }) {
       toggleHeaderSound,
       liveInfo,
       handleNavigation,
+      webViewRef,
     }}>
       {children}
     </PlayerContext.Provider>

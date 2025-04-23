@@ -16,14 +16,12 @@ import { useRouter, Link } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from './context/auth';
 import axios from 'axios';
+import { BRAND_COLORS } from './styles/brandColors';
+import { Dimensions } from 'react-native';
+const { width, height } = Dimensions.get('window');
 
 const API_URL = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/auth`; 
 
-const BRAND_COLORS = {
-  beige: '#e5d7be',
-  black: '#131200',
-  redOrange: '#d34e24'
-};
 
 export default function LoginScreen() {
   const [username, setUsername] = useState('');
@@ -51,7 +49,7 @@ export default function LoginScreen() {
 
       const { token, user } = response.data;
       
-      await login(user, token);
+      await login({ email: username, password });
       
       router.replace('/(tabs)');
     } catch (error) {
@@ -185,7 +183,9 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: 20,
-    backgroundColor: BRAND_COLORS.beige
+    backgroundColor: BRAND_COLORS.background,
+    width: width,
+    height: height
   },
   logoContainer: {
     alignItems: 'center',
@@ -195,7 +195,7 @@ const styles = StyleSheet.create({
   logo: {
     width: 300,
     height: 200,
-    backgroundColor: BRAND_COLORS.beige, 
+    backgroundColor: BRAND_COLORS.background, 
   },
   inputContainer: {
     width: '100%',
@@ -238,7 +238,7 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   button: {
-    backgroundColor: BRAND_COLORS.redOrange,
+    backgroundColor: BRAND_COLORS.accent,
     padding: 15,
     borderRadius: 8,
     alignItems: 'center',
@@ -246,7 +246,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   buttonText: {
-    color: BRAND_COLORS.beige,
+    color: BRAND_COLORS.background,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -264,13 +264,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: BRAND_COLORS.redOrange,
+    borderColor: BRAND_COLORS.accent,
     alignItems: 'center',
     justifyContent: 'center',
     minWidth: '45%',
   },
   secondaryButtonText: {
-    color: BRAND_COLORS.redOrange,
+    color: BRAND_COLORS.accent,
     fontSize: 14,
     fontWeight: '500',
   },

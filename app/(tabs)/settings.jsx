@@ -8,21 +8,89 @@ import {
   Switch,
   ActivityIndicator,
   Alert,
-  TextInput,
   SafeAreaView,
-  Platform
+  Platform,
+  Animated, 
+  Dimensions
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import { useAuth } from '../context/auth';
-
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BRAND_COLORS } from '../styles/brandColors';
+import { storeEncrypted, getEncrypted } from '../../app/utils/encryptedStorage';
 const API_URL = `${process.env.EXPO_PUBLIC_BACKEND_URL}`;
+const { width, height } = Dimensions.get('window');
 
-const BRAND_COLORS = {
-  beige: '#e5d7be',
-  black: '#131200',
-  redOrange: '#d34e24'
+const CollapsibleSection = ({ title, children, initiallyExpanded = false }) => {
+  const [expanded, setExpanded] = useState(initiallyExpanded);
+  const [height] = useState(new Animated.Value(initiallyExpanded ? 1 : 0));
+  
+  useEffect(() => {
+    Animated.timing(height, {
+      toValue: expanded ? 1 : 0,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+  }, [expanded, height]);
+  
+  const toggleExpand = () => {
+    setExpanded(!expanded);
+  };
+  
+  const maxHeight = height.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 500],  // Adjust maximum height as needed
+  });
+  
+  return (
+    <View style={styles.collapsibleSection}>
+      <TouchableOpacity 
+        style={styles.sectionHeader} 
+        onPress={toggleExpand}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.sectionTitle}>{title}</Text>
+        <Ionicons 
+          name={expanded ? 'chevron-up' : 'chevron-down'} 
+          size={24} 
+          color={BRAND_COLORS.accent} 
+        />
+      </TouchableOpacity>
+      
+      <Animated.View style={[
+        styles.collapsibleContent,
+        { maxHeight, opacity: height }
+      ]}>
+        {children}
+      </Animated.View>
+    </View>
+  );
+};
+
+// Reusable toggle component to ensure consistent formatting
+const PreferenceToggle = ({ title, description, value, onToggle, isLast = false }) => {
+  return (
+    <View style={[
+      styles.settingItem, 
+      isLast && { borderBottomWidth: 0 }
+    ]}>
+      <View style={styles.settingTextContainer}>
+        <Text style={styles.settingTitle}>{title}</Text>
+        <Text style={styles.settingDescription}>
+          {description}
+        </Text>
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onToggle}
+        trackColor={{ false: '#767577', true: BRAND_COLORS.accent }}
+        thumbColor={value ? '#fff' : '#f4f3f4'}
+        ios_backgroundColor="#3e3e3e"
+      />
+    </View>
+  );
 };
 
 export default function SettingsScreen() {
@@ -30,7 +98,7 @@ export default function SettingsScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
-  const [editMode, setEditMode] = useState(false);
+  const [savingPreference, setSavingPreference] = useState(null);
   
   // Form fields
   const [firstName, setFirstName] = useState('');
@@ -49,6 +117,21 @@ export default function SettingsScreen() {
   const [artistUpdates, setArtistUpdates] = useState(true);
   const [appUpdates, setAppUpdates] = useState(true);
   
+  // First, make sure your preferences state is properly initialized:
+  const [preferences, setPreferences] = useState({
+    newShows: false,
+    events: false,
+    marketingEmails: false,
+    newsletters: false
+  });
+  
+  // First, make sure you have the userProfile state defined at the top of your component:
+  const [userProfile, setUserProfile] = useState({
+    firstName: '',
+    lastName: '',
+    email: ''
+  });
+  
   // Fetch user data
   useEffect(() => {
     if (isLoggedIn) {
@@ -61,119 +144,140 @@ export default function SettingsScreen() {
   const fetchUserData = async () => {
     try {
       setLoading(true);
-      
-      console.log('Using token for auth:', token);
-      
-      if (!token) {
-        throw new Error('No authentication token available');
-      }
-      
-      // Use the correct endpoint
-      const response = await axios.get(`${API_URL}/api/users/me`, {
-        headers: { 
-          Authorization: `Bearer ${token}` 
+      const response = await axios.get(
+        `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/users/me`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
         }
-      });
+      );
       
-      const userData = response.data;
-      console.log('User data received:', userData);
-      setUser(userData);
+      console.log('User data from backend:', JSON.stringify(response.data, null, 2));
       
-      // Set form fields
-      setFirstName(userData.firstName || '');
-      setLastName(userData.lastName || '');
-      setCity(userData.location?.city || '');
-      setCountry(userData.location?.country || '');
+      // Store user data
+      setUser(response.data);
       
-      // Set email preferences
-      setNewsletters(userData.emailPreferences?.newsletters ?? true);
-      setEventUpdates(userData.emailPreferences?.eventUpdates ?? true);
-      setArtistAlerts(userData.emailPreferences?.artistAlerts ?? true);
-      setMarketingEmails(userData.emailPreferences?.marketingEmails ?? false);
+      // Extract and map preferences - use a very explicit mapping approach
+      const mappedPreferences = {
+        newShows: response.data.notificationPreferences?.newShows === true,
+        events: response.data.emailPreferences?.eventUpdates === true,
+        marketingEmails: response.data.emailPreferences?.marketingEmails === true,
+        newsletters: response.data.emailPreferences?.newsletters === true
+      };
       
-      // Set notification preferences
-      setNewShows(userData.notificationPreferences?.newShows ?? true);
-      setArtistUpdates(userData.notificationPreferences?.artistUpdates ?? true);
-      setAppUpdates(userData.notificationPreferences?.appUpdates ?? true);
+      console.log('Initial preferences mapping:', mappedPreferences);
+      
+      // Set the initial preferences state
+      setPreferences(mappedPreferences);
       
     } catch (error) {
       console.error('Error fetching user data:', error);
-      
-      // Log more detailed error info
-      if (error.response) {
-        console.error('Response status:', error.response.status);
-        console.error('Response data:', error.response.data);
-      } else if (error.request) {
-        console.error('No response received:', error.request);
-      } else {
-        console.error('Error message:', error.message);
-      }
-      
-      Alert.alert('Error', 'Failed to load profile data');
+      Alert.alert('Error', 'Failed to load your profile information');
     } finally {
       setLoading(false);
     }
   };
   
-  const saveUserData = async () => {
-    if (!isLoggedIn || !token) return;
-    
+  const handleTogglePreference = async (key) => {
     try {
-      setLoading(true);
-      
-      const updatedUserData = {
-        firstName,
-        lastName,
-        location: {
-          city,
-          country
-        },
-        emailPreferences: {
-          newsletters,
-          eventUpdates,
-          artistAlerts,
-          marketingEmails
-        },
-        notificationPreferences: {
-          newShows,
-          artistUpdates,
-          appUpdates
-        }
+      // Define mappings
+      const prefMappings = {
+        'newShows': { field: 'notificationPreferences', key: 'newShows' },
+        'events': { field: 'emailPreferences', key: 'eventUpdates' },
+        'marketingEmails': { field: 'emailPreferences', key: 'marketingEmails' },
+        'newsletters': { field: 'emailPreferences', key: 'newsletters' }
       };
       
-      console.log('Sending update with token:', token);
-      console.log('Update data:', updatedUserData);
-      
-      // Change this to PATCH instead of PUT to match your backend endpoint
-      const response = await axios.patch(`${API_URL}/api/users/me`, updatedUserData, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-      
-      console.log('Update response:', response.data);
-      Alert.alert('Success', 'Your profile has been updated');
-      setEditMode(false);
-      
-      // Update the local state with the response data
-      setUser(response.data);
-      
-    } catch (error) {
-      console.error('Error updating user data:', error);
-      
-      // Log more detailed error info
-      if (error.response) {
-        console.error('Response status:', error.response.status);
-        console.error('Response data:', error.response.data);
-      } else if (error.request) {
-        console.error('No response received:', error.request);
-      } else {
-        console.error('Error message:', error.message);
+      const mapping = prefMappings[key];
+      if (!mapping) {
+        console.error(`No backend mapping found for ${key}`);
+        return;
       }
       
-      Alert.alert('Error', 'Failed to update profile');
-    } finally {
-      setLoading(false);
+      // Get current value and new value
+      const currentValue = preferences[key] === true;
+      const newValue = !currentValue;
+      
+      console.log(`Toggling ${key} (${mapping.field}.${mapping.key}) from ${currentValue} to ${newValue}`);
+      
+      // Store the previous preferences for rollback if needed
+      const prevPreferences = {...preferences};
+      
+      // Optimistically update UI for ONLY the changed toggle
+      setPreferences(prev => ({
+        ...prev, // Keep all existing values
+        [key]: newValue // Only update the one that changed
+      }));
+      
+      // Create update data
+      const notificationPrefs = { ...(user.notificationPreferences || {}) };
+      const emailPrefs = { ...(user.emailPreferences || {}) };
+      
+      if (mapping.field === 'notificationPreferences') {
+        notificationPrefs[mapping.key] = newValue;
+      } else {
+        emailPrefs[mapping.key] = newValue;
+      }
+      
+      const updateData = {
+        notificationPreferences: notificationPrefs,
+        emailPreferences: emailPrefs
+      };
+      
+      console.log('Sending update to backend:', JSON.stringify(updateData, null, 2));
+      
+      // Send update to backend
+      const response = await axios.patch(
+        `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/users/me`,
+        updateData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      
+      // Update user data with response
+      setUser(response.data);
+      
+      // Extract updated preferences from the response
+      const updatedRawPrefs = {
+        emailPreferences: response.data.emailPreferences || {},
+        notificationPreferences: response.data.notificationPreferences || {}
+      };
+      
+      // This is critical - we need to properly map the entire response
+      // But keep our optimistic UI update for the toggle that just changed
+      const updatedMappedPrefs = {
+        newShows: updatedRawPrefs.notificationPreferences.newShows === true,
+        events: updatedRawPrefs.emailPreferences.eventUpdates === true,
+        marketingEmails: updatedRawPrefs.emailPreferences.marketingEmails === true,
+        newsletters: updatedRawPrefs.emailPreferences.newsletters === true
+      };
+      
+      console.log('Backend response mapped to frontend:', updatedMappedPrefs);
+      
+      // Update our preferences state with all the values from the backend
+      setPreferences(updatedMappedPrefs);
+      
+    } catch (error) {
+      console.error('Error updating preference:', error);
+      
+      if (error.response) {
+        console.error('Error response:', error.response.data);
+        console.error('Status code:', error.response.status);
+      }
+      
+      // On error, revert to previous preferences state 
+      setPreferences(prevPreferences);
+      
+      Alert.alert(
+        'Update Failed',
+        'Failed to update notification preference. Please try again.'
+      );
     }
   };
   
@@ -221,260 +325,148 @@ export default function SettingsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={BRAND_COLORS.redOrange} />
+          <ActivityIndicator size="large" color={BRAND_COLORS.accent} />
           <Text style={styles.loadingText}>Loading your profile...</Text>
         </View>
       </SafeAreaView>
     );
   }
   
+  // Store preferences securely
+  const savePreferences = async () => {
+    await storeEncrypted('userPreferences', preferences);
+  };
+
+  // Load preferences
+  const loadPreferences = async () => {
+    const savedPreferences = await getEncrypted('userPreferences');
+    if (savedPreferences) {
+      setPreferences(savedPreferences);
+    }
+  };
+
+  const resetOnboarding = async () => {
+    try {
+      await AsyncStorage.removeItem('hasSeenOnboarding');
+      // Restart app or navigate to index
+      router.replace('/');
+    } catch (error) {
+      console.error('Error resetting onboarding status:', error);
+    }
+  };
+  
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.contentContainer}>
         <View style={styles.header}>
           <Text style={styles.title}>Settings</Text>
-          {!editMode ? (
+        </View>
+        
+        {/* Profile Information Section */}
+        <CollapsibleSection title="Profile Information" initiallyExpanded={true}>
+          <View style={styles.profileInfo}>
+            <Text style={styles.profileLabel}>Name</Text>
+            <Text style={styles.profileValue}>
+              {user?.firstName ? `${user.firstName} ${user.lastName || ''}` : 'Not set'}
+            </Text>
+            
+            <Text style={styles.profileLabel}>Email</Text>
+            <Text style={styles.profileValue}>
+              {user?.email || 'Not set'}
+            </Text>
+          </View>
+        </CollapsibleSection>
+        
+        {/* App Notifications Section */}
+        <CollapsibleSection title="App Notifications">
+          <View style={styles.preferencesContainer}>
+            {/* Using the reusable toggle component for consistent formatting */}
+            <PreferenceToggle 
+              title="New Shows"
+              description="Get notified when new shows are added"
+              value={preferences.newShows}
+              onToggle={() => handleTogglePreference('newShows')}
+            />
+            
+            <PreferenceToggle 
+              title="Events"
+              description="Receive notifications about upcoming events"
+              value={preferences.events}
+              onToggle={() => handleTogglePreference('events')}
+              isLast={true}
+            />
+          </View>
+        </CollapsibleSection>
+        
+        {/* Email Preferences Section */}
+        <CollapsibleSection title="Email Preferences">
+          <View style={styles.preferencesContainer}>
+            <PreferenceToggle 
+              title="Marketing Emails"
+              description="Receive emails about our products and services"
+              value={preferences.marketingEmails}
+              onToggle={() => handleTogglePreference('marketingEmails')}
+            />
+            
+            <PreferenceToggle 
+              title="Newsletters"
+              description="Receive our weekly newsletter"
+              value={preferences.newsletters}
+              onToggle={() => handleTogglePreference('newsletters')}
+              isLast={true}
+            />
+          </View>
+        </CollapsibleSection>
+        
+        {/* My Favorites Section */}
+        <CollapsibleSection title="My Favorites">
+          <View style={styles.accountContainer}>
             <TouchableOpacity 
-              style={styles.editButton}
-              onPress={() => setEditMode(true)}
+              style={[styles.actionButton, styles.lastActionButton]}
+              onPress={() => router.push('/subscribed-artists')}
             >
-              <Ionicons name="create-outline" size={24} color={BRAND_COLORS.redOrange} />
-              <Text style={styles.editButtonText}>Edit</Text>
+              <Ionicons name="star" size={20} color={BRAND_COLORS.black} />
+              <Text style={styles.actionButtonText}>Subscribed Artists</Text>
+              <Ionicons name="chevron-forward" size={20} color={BRAND_COLORS.black} />
             </TouchableOpacity>
-          ) : (
-            <TouchableOpacity 
-              style={styles.editButton}
-              onPress={saveUserData}
-            >
-              <Ionicons name="save-outline" size={24} color={BRAND_COLORS.redOrange} />
-              <Text style={styles.editButtonText}>Save</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-        
-        {/* Personal Information Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Personal Information</Text>
-          
-          <View style={styles.formRow}>
-            <Text style={styles.label}>First Name</Text>
-            {editMode ? (
-              <TextInput
-                style={styles.input}
-                value={firstName}
-                onChangeText={setFirstName}
-                placeholder="First Name"
-              />
-            ) : (
-              <Text style={styles.value}>{firstName}</Text>
-            )}
           </View>
-          
-          <View style={styles.formRow}>
-            <Text style={styles.label}>Last Name</Text>
-            {editMode ? (
-              <TextInput
-                style={styles.input}
-                value={lastName}
-                onChangeText={setLastName}
-                placeholder="Last Name"
-              />
-            ) : (
-              <Text style={styles.value}>{lastName}</Text>
-            )}
-          </View>
-          
-          <View style={styles.formRow}>
-            <Text style={styles.label}>Email</Text>
-            <Text style={styles.value}>{user?.email}</Text>
-          </View>
-        </View>
-        
-        {/* Location Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Location</Text>
-          
-          <View style={styles.formRow}>
-            <Text style={styles.label}>City</Text>
-            {editMode ? (
-              <TextInput
-                style={styles.input}
-                value={city}
-                onChangeText={setCity}
-                placeholder="City"
-              />
-            ) : (
-              <Text style={styles.value}>{city || 'Not specified'}</Text>
-            )}
-          </View>
-          
-          <View style={styles.formRow}>
-            <Text style={styles.label}>Country</Text>
-            {editMode ? (
-              <TextInput
-                style={styles.input}
-                value={country}
-                onChangeText={setCountry}
-                placeholder="Country"
-              />
-            ) : (
-              <Text style={styles.value}>{country || 'Not specified'}</Text>
-            )}
-          </View>
-        </View>
-        
-        {/* Email Preferences */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Email Preferences</Text>
-          
-          <View style={styles.switchRow}>
-            <View style={styles.switchTextContainer}>
-              <Text style={styles.switchLabel}>Newsletters</Text>
-              <Text style={styles.switchDescription}>
-                Receive our weekly newsletter
-              </Text>
-            </View>
-            <Switch
-              value={newsletters}
-              onValueChange={setNewsletters}
-              trackColor={{ false: '#ccc', true: BRAND_COLORS.redOrange }}
-              thumbColor="#fff"
-              disabled={!editMode}
-            />
-          </View>
-          
-          <View style={styles.switchRow}>
-            <View style={styles.switchTextContainer}>
-              <Text style={styles.switchLabel}>Event Updates</Text>
-              <Text style={styles.switchDescription}>
-                Get notified about upcoming events
-              </Text>
-            </View>
-            <Switch
-              value={eventUpdates}
-              onValueChange={setEventUpdates}
-              trackColor={{ false: '#ccc', true: BRAND_COLORS.redOrange }}
-              thumbColor="#fff"
-              disabled={!editMode}
-            />
-          </View>
-          
-          <View style={styles.switchRow}>
-            <View style={styles.switchTextContainer}>
-              <Text style={styles.switchLabel}>Artist Alerts</Text>
-              <Text style={styles.switchDescription}>
-                Get updates from your favorite artists
-              </Text>
-            </View>
-            <Switch
-              value={artistAlerts}
-              onValueChange={setArtistAlerts}
-              trackColor={{ false: '#ccc', true: BRAND_COLORS.redOrange }}
-              thumbColor="#fff"
-              disabled={!editMode}
-            />
-          </View>
-          
-          <View style={styles.switchRow}>
-            <View style={styles.switchTextContainer}>
-              <Text style={styles.switchLabel}>Marketing Emails</Text>
-              <Text style={styles.switchDescription}>
-                Receive promotional offers and deals
-              </Text>
-            </View>
-            <Switch
-              value={marketingEmails}
-              onValueChange={setMarketingEmails}
-              trackColor={{ false: '#ccc', true: BRAND_COLORS.redOrange }}
-              thumbColor="#fff"
-              disabled={!editMode}
-            />
-          </View>
-        </View>
-        
-        {/* Notification Preferences */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>App Notifications</Text>
-          
-          <View style={styles.switchRow}>
-            <View style={styles.switchTextContainer}>
-              <Text style={styles.switchLabel}>New Shows</Text>
-              <Text style={styles.switchDescription}>
-                Get notified when new shows are added
-              </Text>
-            </View>
-            <Switch
-              value={newShows}
-              onValueChange={setNewShows}
-              trackColor={{ false: '#ccc', true: BRAND_COLORS.redOrange }}
-              thumbColor="#fff"
-              disabled={!editMode}
-            />
-          </View>
-          
-          <View style={styles.switchRow}>
-            <View style={styles.switchTextContainer}>
-              <Text style={styles.switchLabel}>Artist Updates</Text>
-              <Text style={styles.switchDescription}>
-                Get notifications about your favorite artists
-              </Text>
-            </View>
-            <Switch
-              value={artistUpdates}
-              onValueChange={setArtistUpdates}
-              trackColor={{ false: '#ccc', true: BRAND_COLORS.redOrange }}
-              thumbColor="#fff"
-              disabled={!editMode}
-            />
-          </View>
-          
-          <View style={styles.switchRow}>
-            <View style={styles.switchTextContainer}>
-              <Text style={styles.switchLabel}>App Updates</Text>
-              <Text style={styles.switchDescription}>
-                Get notified about app updates and new features
-              </Text>
-            </View>
-            <Switch
-              value={appUpdates}
-              onValueChange={setAppUpdates}
-              trackColor={{ false: '#ccc', true: BRAND_COLORS.redOrange }}
-              thumbColor="#fff"
-              disabled={!editMode}
-            />
-          </View>
-        </View>
+        </CollapsibleSection>
         
         {/* Account Actions */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Account</Text>
-          
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={() => router.push('/change-password')}
-          >
-            <Ionicons name="key-outline" size={20} color={BRAND_COLORS.black} />
-            <Text style={styles.actionButtonText}>Change Password</Text>
-            <Ionicons name="chevron-forward" size={20} color={BRAND_COLORS.black} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={() => router.push('/subscribed-artists')}
-          >
-            <Ionicons name="people-outline" size={20} color={BRAND_COLORS.black} />
-            <Text style={styles.actionButtonText}>Subscribed Artists</Text>
-            <Ionicons name="chevron-forward" size={20} color={BRAND_COLORS.black} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.actionButton, styles.logoutButton]}
-            onPress={handleLogout}
-          >
-            <Ionicons name="log-out-outline" size={20} color={BRAND_COLORS.redOrange} />
-            <Text style={styles.logoutText}>Logout</Text>
-          </TouchableOpacity>
-        </View>
+        <CollapsibleSection title="Account">
+          <View style={styles.accountContainer}>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => router.push('/change-password')}
+            >
+              <Ionicons name="key-outline" size={20} color={BRAND_COLORS.black} />
+              <Text style={styles.actionButtonText}>Change Password</Text>
+              <Ionicons name="chevron-forward" size={20} color={BRAND_COLORS.black} />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.logoutButton]}
+              onPress={handleLogout}
+            >
+              <Ionicons name="log-out-outline" size={20} color={BRAND_COLORS.accent} />
+              <Text style={styles.logoutText}>Logout</Text>
+            </TouchableOpacity>
+          </View>
+        </CollapsibleSection>
+        
+        {/* About Section */}
+        <CollapsibleSection title="About">
+          <View style={styles.accountContainer}>
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.lastActionButton]}
+              onPress={() => router.push('/about')}
+            >
+              <Ionicons name="information-circle-outline" size={20} color={BRAND_COLORS.black} />
+              <Text style={styles.actionButtonText}>About Voices Radio</Text>
+              <Ionicons name="chevron-forward" size={20} color={BRAND_COLORS.black} />
+            </TouchableOpacity>
+          </View>
+        </CollapsibleSection>
         
         <Text style={styles.versionText}>Version 1.0.0</Text>
       </ScrollView>
@@ -485,7 +477,9 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BRAND_COLORS.beige,
+    backgroundColor: BRAND_COLORS.background,
+    width: width,
+    height: height
   },
   contentContainer: {
     padding: 16,
@@ -500,74 +494,46 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: BRAND_COLORS.redOrange,
+    color: BRAND_COLORS.accent,
   },
-  editButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  profileInfo: {
+    padding: 15,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
   },
-  editButtonText: {
-    marginLeft: 6,
-    fontSize: 16,
-    color: BRAND_COLORS.redOrange,
-  },
-  section: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: BRAND_COLORS.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: BRAND_COLORS.black,
-    marginBottom: 16,
-  },
-  formRow: {
-    marginBottom: 16,
-  },
-  label: {
+  profileLabel: {
     fontSize: 14,
-    color: 'gray',
+    color: '#666',
     marginBottom: 4,
   },
-  value: {
+  profileValue: {
     fontSize: 16,
-    color: BRAND_COLORS.black,
+    color: '#333',
+    marginBottom: 16,
   },
-  input: {
-    height: 40,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    fontSize: 16,
-    backgroundColor: '#fff',
-    color: BRAND_COLORS.black,
+  preferencesContainer: {
+    padding: 15,
   },
-  switchRow: {
+  settingItem: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 8,
+    justifyContent: 'space-between',
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
-  switchTextContainer: {
+  settingTextContainer: {
     flex: 1,
+    marginRight: 10,
   },
-  switchLabel: {
+  settingTitle: {
     fontSize: 16,
-    color: BRAND_COLORS.black,
+    fontWeight: '500',
+    color: '#333',
   },
-  switchDescription: {
-    fontSize: 12,
-    color: 'gray',
+  settingDescription: {
+    fontSize: 14,
+    color: '#666',
     marginTop: 2,
   },
   actionButton: {
@@ -576,6 +542,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+  },
+  lastActionButton: {
+    borderBottomWidth: 0,
   },
   actionButtonText: {
     flex: 1,
@@ -590,7 +559,7 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 12,
     fontSize: 16,
-    color: BRAND_COLORS.redOrange,
+    color: BRAND_COLORS.accent,
     fontWeight: '500',
   },
   versionText: {
@@ -622,7 +591,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   button: {
-    backgroundColor: BRAND_COLORS.redOrange,
+    backgroundColor: BRAND_COLORS.accent,
     padding: 15,
     borderRadius: 8,
     alignItems: 'center',
@@ -631,8 +600,40 @@ const styles = StyleSheet.create({
     maxWidth: 250,
   },
   buttonText: {
-    color: BRAND_COLORS.beige,
+    color: BRAND_COLORS.background,
     fontSize: 16,
     fontWeight: '600',
+  },
+  collapsibleSection: {
+    backgroundColor: '#fff',
+    margin: 10,
+    borderRadius: 10,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    backgroundColor: '#fff',
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  collapsibleContent: {
+    overflow: 'hidden',
+  },
+  accountContainer: {
+    padding: 15,
   },
 }); 

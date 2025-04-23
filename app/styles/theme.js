@@ -7,8 +7,6 @@ const BRAND_COLORS = {
   // Accent color (sparingly used)
   accent: '#d34e24',          // Original accent for brand recognition
   accentLight: 'rgba(211, 78, 36, 0.15)', // Transparent version for subtle highlights
-
-  black: '#000000',
   
   // UI elements
   divider: '#2C2C2C',         // Subtle dividers

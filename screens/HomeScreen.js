@@ -8,23 +8,22 @@ import {
   ImageBackground,
   Platform,
   Modal,
-  FlatList
+  FlatList,
+  ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
 import axios from 'axios';
 import { usePlayer } from '../app/context/PlayerContext'; // Path with app prefix for context
-
+import { useScroll } from '../app/context/ScrollContext';
+import { useRouter, usePathname } from 'expo-router';
+import { BRAND_COLORS } from '../app/styles/brandColors';
 // Get screen width for responsive sizing
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 const TILE_SIZE = width / 2 - 12; // Two tiles per row with a small gap
 
 // First, let's define our brand colors at the top of the file
-const BRAND_COLORS = {
-  beige: '#e5d7be',
-  black: '#131200',
-  redOrange: '#d34e24'
-};
 
 // Extract the path from Mixcloud iframe URL to get API endpoint
 const extractMixcloudPath = (iframeUrl) => {
@@ -44,7 +43,7 @@ const extractMixcloudPath = (iframeUrl) => {
 const FALLBACK_IMAGE_URL = 'https://via.placeholder.com/600x600/007AFF/FFFFFF?text=Music';
 
 const HomeScreen = () => {
-  const { handleTilePress } = usePlayer();
+  const { handleTilePress, activeTileId, isPlaying } = usePlayer();
   const [tiles, setTiles] = useState([]);
   const [liveInfo, setLiveInfo] = useState(null);
   const [isLoadingTiles, setIsLoadingTiles] = useState(true);
@@ -54,11 +53,19 @@ const HomeScreen = () => {
   const [currentPlayingUrl, setCurrentPlayingUrl] = useState('');
   const webViewRef = useRef(null);
   const [sound, setSound] = useState(null);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [playerModalVisible, setPlayerModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const hiddenWebViewRef = useRef(null);
   const playbackInitialized = useRef(false);
+  const flatListRef = useRef(null);
+  const { updateScrollPosition, getScrollPosition } = useScroll();
+  const pathname = usePathname();
+  const [showLiveStream, setShowLiveStream] = useState(false);
+  const [isLiveStreamPlaying, setIsLiveStreamPlaying] = useState(false);
+  const liveStreamWebViewRef = useRef(null);
+  const [showChat, setShowChat] = useState(false);
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const chatWebViewRef = useRef(null);
 
   // Fetch Mixcloud image URL using their API
   const fetchMixcloudData = async (mixcloudPath) => {
@@ -70,13 +77,18 @@ const HomeScreen = () => {
       
       // Call the Mixcloud API
       const response = await axios.get(`https://api.mixcloud.com/${path}`);
-      console.log(`Mixcloud API response for ${path}:`, response.data);
       
-      if (response.data && response.data.pictures && response.data.pictures.extra_large) {
+      if (response.data) {
+        // Extract genres from tags
+        const genres = response.data.tags 
+          ? response.data.tags.map(tag => tag.name).slice(0, 3) 
+          : [];
+        
         return {
-          imageUrl: response.data.pictures.extra_large,
+          imageUrl: response.data.pictures?.extra_large,
           title: response.data.name || '',
           description: response.data.description || '',
+          genres: genres
         };
       }
       return null;
@@ -90,17 +102,13 @@ const HomeScreen = () => {
   const fetchTiles = async () => {
     setIsLoadingTiles(true);
     try {
-      console.log('Entering fetchTiles');
       const API_URL = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/featured-shows/getShows`;
-      console.log(API_URL);
 
       const response = await axios.get(API_URL);
-      console.log("Raw response from API:", response.data[0]); // Log first tile data
       
-      // First set tiles with basic data and correct iframeUrl format
       const initialTiles = response.data.map(tile => {
         const mixcloudPath = extractMixcloudPath(tile.iframeUrl);
-        console.log("Extracted Mixcloud path:", mixcloudPath); // Log extracted path
+        console.log("Extracted Mixcloud path:", mixcloudPath);
         
         return { 
           _id: tile._id,
@@ -109,29 +117,30 @@ const HomeScreen = () => {
           key: mixcloudPath,
           mixcloudPath: mixcloudPath,
           iframeUrl: `https://player-widget.mixcloud.com/widget/iframe/?hide_cover=1&mini=1&light=1&feed=${encodeURIComponent(mixcloudPath)}`,
+          genres: [] // Initialize empty genres array
         };
       });
       
-      console.log("Initial tile with formatted URL:", initialTiles[0]); // Log first formatted tile
       setTiles(initialTiles);
       
-      // Then fetch each Mixcloud data in parallel (keep this part for images)
+      // Then fetch each Mixcloud data in parallel
       const tileUpdatesPromises = initialTiles.map(async (tile, index) => {
         if (tile.mixcloudPath) {
           const mixcloudData = await fetchMixcloudData(tile.mixcloudPath);
           if (mixcloudData) {
-            console.log("Mixcloud data for tile:", index, mixcloudData); // Log image data
+            console.log("Mixcloud data for tile:", index, mixcloudData);
             return {
               index,
               updates: {
                 imageUrl: mixcloudData.imageUrl,
                 mixcloudTitle: mixcloudData.title,
-                mixcloudDescription: mixcloudData.description
+                mixcloudDescription: mixcloudData.description,
+                genres: mixcloudData.genres || [] // Add genres from the API response
               }
             };
           }
         }
-        return { index, updates: { imageUrl: FALLBACK_IMAGE_URL } };
+        return { index, updates: { imageUrl: FALLBACK_IMAGE_URL, genres: [] } };
       });
       
       // Apply all updates once they're ready
@@ -146,7 +155,6 @@ const HomeScreen = () => {
             };
           }
         });
-        console.log("Final tile with image:", newTiles[0]); // Log final tile data
         return newTiles;
       });
       
@@ -173,12 +181,11 @@ const HomeScreen = () => {
         console.warn('Server response is not JSON:', contentType);
         // Try to get text to see what's being returned
         const text = await response.text();
-        console.log('Server response:', text.substring(0, 200)); // Log first 200 chars
         throw new Error('Server did not return JSON');
       }
       
       const data = await response.json();
-      setLiveInfo(data);
+        setLiveInfo(data);
     } catch (error) {
       console.error('Error fetching live info:', error);
       // Prevent constant retries if failing
@@ -189,7 +196,6 @@ const HomeScreen = () => {
   };
 
   useEffect(() => {
-    console.log('Fetching tiles');
     fetchTiles();
     fetchLiveInfo();
 
@@ -212,18 +218,34 @@ const HomeScreen = () => {
   const togglePlayback = () => {
     // This is now a no-op function since we're using Mixcloud's controls
     // But we keep it to prevent the reference error
-    console.log('togglePlayback called - using Mixcloud built-in controls instead');
   };
 
   // Setup effect to handle unmounting
   useEffect(() => {
     return () => {
       if (sound) {
-        sound.unloadAsync();
-      }
+          sound.unloadAsync();
+        }
     };
   }, [sound]);
 
+  const handleScroll = (event) => {
+    const scrollY = event.nativeEvent.contentOffset.y;
+    updateScrollPosition('home', scrollY);
+  };
+
+  // Restore scroll position when pathname changes (screen is focused)
+  useEffect(() => {
+    const scrollPosition = getScrollPosition('home');
+    if (flatListRef.current && scrollPosition > 0) {
+      setTimeout(() => {
+        flatListRef.current.scrollToOffset({
+          offset: scrollPosition,
+          animated: false
+        });
+      }, 100);
+    }
+  }, [pathname]); // This will run when the pathname changes
 
   // Revise the WebView rendering approach and modal structure
   const renderWebView = () => {
@@ -388,9 +410,8 @@ const HomeScreen = () => {
       
       if (data.type === 'playAfterPause') {
         // Handle play after pause feedback
-        setLoading(false);
+    setLoading(false);
         setIsPlaying(true); // Always update UI for better responsiveness
-        console.log('Play after pause result:', data.success);
       }
       
       if (data.type === 'buttonClick') {
@@ -437,11 +458,68 @@ const HomeScreen = () => {
     }
   };
 
+  const toggleLiveStream = () => {
+    setShowLiveStream(prev => !prev);
+    
+    // If we're showing the stream, pause any other playback
+    if (!showLiveStream && isPlaying) {
+      // Pause the current playing show if needed
+      // This depends on your existing playback control implementation
+    }
+  };
+
+  const checkIfLive = async () => {
+    try {
+      const response = await fetch('https://www.mixcloud.com/live/VoicesRadio/');
+      const html = await response.text();
+      
+      // If the page contains indicators that the stream is live
+      const isLive = html.includes('is live now') || html.includes('LIVE');
+      
+      return isLive;
+    } catch (error) {
+      console.error('Error checking live status:', error);
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    const checkLiveStatus = async () => {
+      const isLive = await checkIfLive();
+      // You could add state to show "LIVE" indicator when isLive is true
+    };
+    
+    checkLiveStatus();
+    const interval = setInterval(checkLiveStatus, 60000); // Check every minute
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  const toggleChat = () => {
+    setShowChat(prev => !prev);
+  };
+
+  // Add this useEffect to detect orientation changes
+  useEffect(() => {
+    const updateOrientation = () => {
+      const { width, height } = Dimensions.get('window');
+    };
+    
+    Dimensions.addEventListener('change', updateOrientation);
+    
+    return () => {
+      // Remove listener on unmount
+      // For newer React Native versions, use this:
+      // Dimensions.removeEventListener('change', updateOrientation);
+    };
+  }, []);
+
   return (
-    <View style={styles.container}>
+   <View style={styles.container}>
       {/* Replace direct TopBanner usage with SafeAreaView wrapper */}
       
       <FlatList
+        ref={flatListRef}
         data={tiles}
         renderItem={({ item, index }) => (
           <TouchableOpacity
@@ -464,9 +542,11 @@ const HomeScreen = () => {
               resizeMode="cover"
             >
               <View style={styles.tileOverlay}>
-                <Text style={styles.tileTitle} numberOfLines={2}>
-                  {item.title}
-                </Text>
+                <View style={styles.tileTitleContainer}>
+                  <Text style={styles.tileTitle} numberOfLines={0}>
+                    {item.title}
+                  </Text>
+                </View>
                 
                 <TouchableOpacity 
                   style={styles.tilePlayButton}
@@ -475,11 +555,6 @@ const HomeScreen = () => {
                     handleTilePress(item, index);
                   }}
                 >
-                  <Ionicons 
-                    name={(activeTileIndex === index && isPlaying) ? "pause-circle" : "play-circle"} 
-                    size={40} 
-                    color="white" 
-                  />
                 </TouchableOpacity>
               </View>
             </ImageBackground>
@@ -490,6 +565,11 @@ const HomeScreen = () => {
         maxToRenderPerBatch={10}
         windowSize={5}
         keyExtractor={(item, index) => item._id || index.toString()}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        maintainVisibleContentPosition={{
+          minIndexForVisible: 0,
+        }}
       />
       
       {/* Modal for full player */}
@@ -669,7 +749,7 @@ const HomeScreen = () => {
                 <Text style={styles.playButtonText}>
                   {isPlaying ? "Pause" : "Play"}
                 </Text>
-              </TouchableOpacity>
+        </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -678,24 +758,212 @@ const HomeScreen = () => {
       
       {/* Render the WebView outside of components but connected */}
       {renderWebView()}
+
+      {/* Live Stream Button at the top of the screen */}
+      <View style={styles.liveStreamBanner}>
+        <View style={styles.actionButtons}>
+          <TouchableOpacity 
+            style={styles.liveStreamButton}
+            onPress={toggleLiveStream}
+          >
+            <View style={styles.liveIndicator} />
+            <Text style={styles.liveStreamButtonText}>
+              {showLiveStream ? 'Hide Live Stream' : 'Watch Live'}
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.chatButton}
+            onPress={toggleChat}
+          >
+            <Ionicons name="chatbubbles" size={16} color={BRAND_COLORS.background} />
+            <Text style={styles.chatButtonText}>Chat</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Live Stream WebView */}
+      {showLiveStream && (
+        <View style={styles.liveStreamContainer}>
+          <View style={styles.liveStreamHeader}>
+            <Text style={styles.liveStreamTitle}>Voices Radio Live</Text>
+            <View style={styles.liveStreamControls}>
+              <TouchableOpacity 
+                style={styles.liveStreamChatButton}
+                onPress={toggleChat}
+              >
+                <Ionicons name="chatbubbles" size={24} color={BRAND_COLORS.background} />
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.closeLiveStreamButton}
+                onPress={() => setShowLiveStream(false)}
+              >
+                <Ionicons name="close" size={24} color={BRAND_COLORS.background} />
+              </TouchableOpacity>
+            </View>
+          </View>
+          
+          {/* If chat is open and live stream is showing, display them side by side */}
+          {showChat ? (
+            <View style={getSplitContainerStyle()}>
+              <View style={getLiveStreamWebViewContainerStyle()}>
+                <WebView
+                  ref={liveStreamWebViewRef}
+                  source={{
+                    uri: 'https://www.mixcloud.com/live/VoicesRadio/'
+                  }}
+                  style={styles.liveStreamWebView}
+                  mediaPlaybackRequiresUserAction={false}
+                  allowsInlineMediaPlayback={true}
+                  javaScriptEnabled={true}
+                  onShouldStartLoadWithRequest={() => true}
+                  originWhitelist={['*']}
+                  onMessage={(event) => {
+                    try {
+                      const data = JSON.parse(event.nativeEvent.data);
+                      console.log('Live stream message:', data);
+                      
+                      // Handle messages from the webview
+                      if (data.type === 'playbackStatus') {
+                        setIsLiveStreamPlaying(data.isPlaying);
+                      }
+                    } catch (e) {
+                      console.error('Error parsing live stream message:', e);
+                    }
+                  }}
+                  injectedJavaScript={`
+                    // Listen for play/pause events
+                    document.addEventListener('play', function() {
+                      window.ReactNativeWebView.postMessage(JSON.stringify({
+                        type: 'playbackStatus',
+                        isPlaying: true
+                      }));
+                    }, true);
+                    
+                    document.addEventListener('pause', function() {
+                      window.ReactNativeWebView.postMessage(JSON.stringify({
+                        type: 'playbackStatus',
+                        isPlaying: false
+                      }));
+                    }, true);
+                    
+                    // Auto-play the stream when loaded
+                    setTimeout(() => {
+                      const playButton = document.querySelector('.play-button');
+                      if (playButton) playButton.click();
+                    }, 1000);
+                    
+                    true;
+                  `}
+                />
+              </View>
+              <View style={getLiveChatContainerStyle()}>
+                <WebView
+                  source={{ uri: 'https://voicesradiokx.chatango.com/m' }}
+                  style={styles.chatWebView}
+                  originWhitelist={['*']}
+                  javaScriptEnabled={true}
+                  domStorageEnabled={true}
+                />
+              </View>
+            </View>
+            
+          ) : (
+            // Just show the live stream if chat is not open
+            <WebView
+              ref={liveStreamWebViewRef}
+              source={{
+                uri: 'https://www.mixcloud.com/live/VoicesRadio/'
+              }}
+              style={styles.liveStreamWebView}
+              mediaPlaybackRequiresUserAction={false}
+              allowsInlineMediaPlayback={true}
+              javaScriptEnabled={true}
+              onShouldStartLoadWithRequest={() => true}
+              originWhitelist={['*']}
+              onMessage={(event) => {
+                try {
+                  const data = JSON.parse(event.nativeEvent.data);
+                  console.log('Live stream message:', data);
+                  
+                  // Handle messages from the webview
+                  if (data.type === 'playbackStatus') {
+                    setIsLiveStreamPlaying(data.isPlaying);
+                  }
+                } catch (e) {
+                  console.error('Error parsing live stream message:', e);
+                }
+              }}
+              injectedJavaScript={`
+                // Listen for play/pause events
+                document.addEventListener('play', function() {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'playbackStatus',
+                    isPlaying: true
+                  }));
+                }, true);
+                
+                document.addEventListener('pause', function() {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'playbackStatus',
+                    isPlaying: false
+                  }));
+                }, true);
+                
+                // Auto-play the stream when loaded
+                setTimeout(() => {
+                  const playButton = document.querySelector('.play-button');
+                  if (playButton) playButton.click();
+                }, 1000);
+                
+                true;
+              `}
+            />
+          )}
+        </View>
+      )}
+
+      {showChat && (
+        <View style={styles.chatContainer}>
+          <View style={styles.chatHeader}>
+            <Text style={styles.chatTitle}>Voices Radio Chat</Text>
+            <TouchableOpacity 
+              style={styles.closeChatButton}
+              onPress={() => setShowChat(false)}
+            >
+              <Ionicons name="close" size={24} color={BRAND_COLORS.background} />
+            </TouchableOpacity>
+          </View>
+          <WebView
+            source={{ uri: 'https://voicesradiokx.chatango.com/m' }}
+            style={styles.chatWebView}
+            originWhitelist={['*']}
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
+          />
+        </View>
+      )}
     </View>
   );
 };
 
+// First, define your styles without the dynamic values
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BRAND_COLORS.beige, 
+    width: width,
+    height: height,
+    backgroundColor: BRAND_COLORS.background, 
   },
   liveInfoStrip: {
     flexDirection: 'row',
-    backgroundColor: BRAND_COLORS.black,
+    backgroundColor: BRAND_COLORS.primaryText,
     alignItems: 'center',
     height: 50,
     paddingHorizontal: 10,
   },
   playButton: {
-    backgroundColor: BRAND_COLORS.black,
+    backgroundColor: BRAND_COLORS.primaryText,
     marginRight: 15,
     width: 40,
     height: 40,
@@ -707,7 +975,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   marqueeText: {
-    color: BRAND_COLORS.beige, // Changed from 'white'
+    color: BRAND_COLORS.background, // Changed from 'white'
     fontSize: 16,
     fontWeight: 'bold',
     lineHeight: 50,
@@ -719,7 +987,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 10,
     fontSize: 16,
-    color: BRAND_COLORS.black, // Changed from '#333'
+    color: BRAND_COLORS.primaryText, // Changed from '#333'
   },
   tilesContainer: {
     flexDirection: 'row',
@@ -732,8 +1000,8 @@ const styles = StyleSheet.create({
     margin: 4,
     borderRadius: 8, // Added slight rounding for friendlier look
     overflow: 'hidden',
-    backgroundColor: '#fff', // Added for better contrast with beige background
-    shadowColor: BRAND_COLORS.black,
+    backgroundColor: '#fff', // Added for better contrast with background background
+    shadowColor: BRAND_COLORS.primaryText,
     shadowOffset: {
       width: 0,
       height: 2,
@@ -751,15 +1019,21 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(19, 18, 0, 0.5)', // Using brand black with opacity
     padding: 10,
     height: '100%',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end', // Changed from 'space-between' to position content at bottom
     alignItems: 'center',
+  },
+  tileTitleContainer: {
+    width: '100%',
+    justifyContent: 'center',
+    padding: 5,
+    marginBottom: -40, // Add margin at bottom for spacing
   },
   tileTitle: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: BRAND_COLORS.beige, // Changed from '#FFF'
+    color: BRAND_COLORS.primaryText,
     textAlign: 'center',
-    marginTop: 'auto',
+    flexWrap: 'wrap',
   },
   tilePlayButton: {
     marginTop: 10,
@@ -778,7 +1052,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 12,
     shadowColor: '#000',
     shadowOffset: {
-      width: 0,
+    width: 0,
       height: -3,
     },
     shadowOpacity: 0.27,
@@ -851,12 +1125,12 @@ const styles = StyleSheet.create({
   modalContent: {
     width: '90%',
     height: '75%',
-    backgroundColor: BRAND_COLORS.beige, // Changed from 'white'
+    backgroundColor: BRAND_COLORS.background, // Changed from 'white'
     borderRadius: 12,
     overflow: 'hidden',
-    shadowColor: BRAND_COLORS.black,
+    shadowColor: BRAND_COLORS.primaryText,
     shadowOffset: {
-      width: 0,
+    width: 0,
       height: 4,
     },
     shadowOpacity: 0.3,
@@ -870,13 +1144,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: BRAND_COLORS.black,
-    backgroundColor: BRAND_COLORS.beige,
+    borderBottomColor: BRAND_COLORS.primaryText,
+    backgroundColor: BRAND_COLORS.background,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: BRAND_COLORS.redOrange, 
+    color: BRAND_COLORS.accent, 
     flex: 1,
   },
   webViewContainer: {
@@ -893,13 +1167,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   playButton: {
-    backgroundColor: BRAND_COLORS.redOrange, 
+    backgroundColor: BRAND_COLORS.accent, 
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 8,
   },
   playButtonText: {
-    color: BRAND_COLORS.beige, // Changed from 'white'
+    color: BRAND_COLORS.background, // Changed from 'white'
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -944,12 +1218,12 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: BRAND_COLORS.redOrange, // Changed to red-orange for headers
+    color: BRAND_COLORS.accent, // Changed to red-orange for headers
     marginBottom: 16,
   },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: BRAND_COLORS.beige,
+    backgroundColor: BRAND_COLORS.background,
     height: Platform.OS === 'ios' ? 80 : 60,
     paddingBottom: Platform.OS === 'ios' ? 25 : 10,
     paddingTop: 5,
@@ -962,11 +1236,256 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   tabLabelActive: {
-    color: BRAND_COLORS.redOrange, // Changed from '#007AFF'
+    color: BRAND_COLORS.accent, // Changed from '#007AFF'
   },
   tabLabelInactive: {
-    color: BRAND_COLORS.black, // Changed from '#8E8E93'
+    color: BRAND_COLORS.primaryText, // Changed from '#8E8E93'
+  },
+  liveStreamBanner: {
+    backgroundColor: BRAND_COLORS.accent,
+    padding: -5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: -5,
+  },
+  liveStreamButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+  },
+  liveIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'red',
+    marginRight: 6,
+  },
+  liveStreamButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: BRAND_COLORS.background,
+  },
+  liveStreamContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: BRAND_COLORS.background,
+    zIndex: 100,
+  },
+  liveStreamHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    backgroundColor: BRAND_COLORS.accent,
+  },
+  liveStreamTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: BRAND_COLORS.background,
+  },
+  closeLiveStreamButton: {
+    padding: 5,
+  },
+  liveStreamWebView: {
+    flex: 1,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: BRAND_COLORS.accent,
+    padding: 10,
+    marginBottom: 10,
+  },
+  chatButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  chatButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: BRAND_COLORS.background,
+    marginLeft: 6,
+  },
+  chatContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: BRAND_COLORS.background,
+    zIndex: 100,
+  },
+  chatHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    backgroundColor: BRAND_COLORS.accent,
+  },
+  chatTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: BRAND_COLORS.background,
+  },
+  closeChatButton: {
+    padding: 5,
+  },
+  chatWebView: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  chatLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  chatLoadingText: {
+    marginTop: 10,
+    color: BRAND_COLORS.accent,
+  },
+  liveStreamControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  liveStreamChatButton: {
+    padding: 5,
+    marginRight: 10,
+  },
+  splitContainer: {
+    flex: 1,
+  },
+  liveStreamWebViewContainer: {
+  },
+  liveChatContainer: {
+    borderColor: BRAND_COLORS.primaryText,
+  },
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    backgroundColor: BRAND_COLORS.accent,
+    padding: 6,
+    marginBottom: 2,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+  },
+  actionButtonText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: BRAND_COLORS.background,
+    marginLeft: 6,
+  },
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    zIndex: 100,
+  },
+  chatModal: {
+    flex: 1,
+    margin: 20,
+    backgroundColor: BRAND_COLORS.background,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  liveStreamModal: {
+    flex: 1,
+    margin: 2,
+    backgroundColor: BRAND_COLORS.background,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  combinedModal: {
+    flex: 1,
+    margin: 20,
+    backgroundColor: BRAND_COLORS.background,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  liveStreamHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    backgroundColor: BRAND_COLORS.accent,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerButton: {
+    padding: 5,
+    marginLeft: 10,
+  },
+  chatWebView: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  liveStreamWebView: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  loadingText: {
+    marginTop: 10,
+    color: BRAND_COLORS.accent,
+  },
+  splitView: {
+    flex: 1,
+    flexDirection: 'column', // Always vertical layout for simplicity
+  },
+  liveStreamSection: {
+    width: '100%',
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  chatSection: {
+    width: '100%',
   },
 });
+
+// Then in your component, create a function to get dynamic styles
+const getSplitContainerStyle = () => {
+  return {
+    ...styles.splitContainer,
+    flexDirection: width > height ? 'row' : 'column',
+  };
+};
+
+const getLiveStreamWebViewContainerStyle = () => {
+  return {
+    ...styles.liveStreamWebViewContainer,
+    flex: width > height ? 1 : 0.6,
+  };
+};
+
+const getLiveChatContainerStyle = () => {
+  return {
+    ...styles.liveChatContainer,
+    width: width > height ? '40%' : '100%',
+    height: width > height ? '100%' : '40%',
+    borderLeftWidth: width > height ? 1 : 0,
+    borderTopWidth: width > height ? 0 : 1,
+  };
+};
 
 export default HomeScreen;
