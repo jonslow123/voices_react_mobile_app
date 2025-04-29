@@ -22,7 +22,7 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.voices-app",
+      "bundleIdentifier": "com.voicesradio.app",
       "buildNumber": "1.0.0",
       "associatedDomains": [
         "applinks:auth.voicesradio.co.uk"
@@ -41,7 +41,7 @@
         "foregroundImage": "./assets/appicon.png",
         "backgroundColor": "#e5d7be"
       },
-      "package": "com.anonymous.voices-app",
+      "package": "com.voicesradio.app",
       "versionCode": 1,
       "intentFilters": [
         {

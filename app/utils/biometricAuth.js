@@ -90,3 +90,10 @@ export const authenticateWithBiometrics = async () => {
     };
   }
 };
+
+export default { 
+  isBiometricAvailable, 
+  setBiometricAuthEnabled, 
+  getBiometricAuthEnabled,
+  authenticateWithBiometrics
+};
