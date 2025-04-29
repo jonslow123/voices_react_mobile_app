@@ -78,7 +78,7 @@
           "icon": "./assets/appicon.png",
           "color": "#ffffff",
           "sounds": [
-            "./assets/notification-sound.wav"
+            "./assets/voices_notification.mp3"
           ]
         }
       ]
