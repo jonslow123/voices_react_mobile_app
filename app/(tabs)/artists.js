@@ -1,14 +1,14 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
 import { usePlayer } from '../context/PlayerContext';
-import ArtistsScreen from '../../screens/ArtistsScreen';
+import ExploreScreen from '../../screens/ExploreScreen';
 import { BRAND_COLORS } from '../styles/brandColors';
 import { Dimensions } from 'react-native';
 const { width, height } = Dimensions.get('window');
 
 export default function ExploreTab() {
   const { handleTilePress } = usePlayer();
-  return <ArtistsScreen />;
+  return <ExploreScreen />;
 }
 
 const styles = StyleSheet.create({

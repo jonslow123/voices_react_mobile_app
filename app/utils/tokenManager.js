@@ -2,6 +2,28 @@
 import { getSecurely, storeSecurely, removeSecurely } from './secureStorage';
 import { jwtDecode } from 'jwt-decode';
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Try to import EncryptedStorage with fallback
+let SecureStorage;
+try {
+  const EncryptedStorage = require('react-native-encrypted-storage').default;
+  SecureStorage = EncryptedStorage;
+} catch (error) {
+  console.warn('EncryptedStorage not available, falling back to AsyncStorage');
+  // Create a fallback that uses AsyncStorage
+  SecureStorage = {
+    setItem: async (key, value) => {
+      return AsyncStorage.setItem(`secure_${key}`, value);
+    },
+    getItem: async (key) => {
+      return AsyncStorage.getItem(`secure_${key}`);
+    },
+    removeItem: async (key) => {
+      return AsyncStorage.removeItem(`secure_${key}`);
+    }
+  };
+}
 
 // Standalone function to check if a token is valid
 export const isTokenValid = (token) => {
@@ -53,11 +75,22 @@ export const refreshAuthToken = async () => {
 };
 
 // Function to get a valid token, refreshing if needed
-export const getValidToken = async () => {
+export const getValidToken = async (options = { redirectOnFailure: false }) => {
   try {
-    const token = await getSecurely('userToken');
+    // Try AsyncStorage first (most reliable in development)
+    let token = await AsyncStorage.getItem('userToken');
+    
+    // If not found in AsyncStorage, try SecureStore as fallback
+    if (!token) {
+      try {
+        token = await SecureStorage.getItem('userToken');
+      } catch (secureError) {
+        console.log('SecureStore error:', secureError);
+      }
+    }
     
     if (!token) {
+      console.log('No token found in storage');
       return null;
     }
     
@@ -71,9 +104,19 @@ export const getValidToken = async () => {
     
     if (refreshed) {
       // Return the new token
-      return await getSecurely('userToken');
+      token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        token = await SecureStorage.getItem('userToken');
+      }
+      return token;
     } else {
-      // Refresh failed, return null
+      // Refresh failed
+      console.log('No valid token available, redirecting to login');
+      
+      // Only redirect if the option is enabled
+      if (options.redirectOnFailure) {
+        // This should be handled by the caller, not here
+      }
       return null;
     }
   } catch (error) {
@@ -81,3 +124,8 @@ export const getValidToken = async () => {
     return null;
   }
 };
+
+// This dummy component satisfies Expo Router's requirements
+export default function TokenManagerComponent() {
+  return null;
+}

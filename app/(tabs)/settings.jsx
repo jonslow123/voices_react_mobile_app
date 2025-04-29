@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,9 +10,11 @@ import {
   Alert,
   SafeAreaView,
   Platform,
-  Animated, 
-  Dimensions
+  Dimensions,
+  Linking,
+  TextInput
 } from 'react-native';
+import ProfileSection from '../../components/ProfileSection'; 
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
@@ -20,54 +22,17 @@ import { useAuth } from '../context/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BRAND_COLORS } from '../styles/brandColors';
 import { storeEncrypted, getEncrypted } from '../../app/utils/encryptedStorage';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import * as Clipboard from 'expo-clipboard';
+import * as SecureStore from 'expo-secure-store';
+import { 
+  isBiometricAvailable, 
+  setBiometricAuthEnabled, 
+  getBiometricAuthEnabled
+} from '../../app/utils/biometricAuth';
 const API_URL = `${process.env.EXPO_PUBLIC_BACKEND_URL}`;
 const { width, height } = Dimensions.get('window');
-
-const CollapsibleSection = ({ title, children, initiallyExpanded = false }) => {
-  const [expanded, setExpanded] = useState(initiallyExpanded);
-  const [height] = useState(new Animated.Value(initiallyExpanded ? 1 : 0));
-  
-  useEffect(() => {
-    Animated.timing(height, {
-      toValue: expanded ? 1 : 0,
-      duration: 300,
-      useNativeDriver: false,
-    }).start();
-  }, [expanded, height]);
-  
-  const toggleExpand = () => {
-    setExpanded(!expanded);
-  };
-  
-  const maxHeight = height.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 500],  // Adjust maximum height as needed
-  });
-  
-  return (
-    <View style={styles.collapsibleSection}>
-      <TouchableOpacity 
-        style={styles.sectionHeader} 
-        onPress={toggleExpand}
-        activeOpacity={0.8}
-      >
-        <Text style={styles.sectionTitle}>{title}</Text>
-        <Ionicons 
-          name={expanded ? 'chevron-up' : 'chevron-down'} 
-          size={24} 
-          color={BRAND_COLORS.accent} 
-        />
-      </TouchableOpacity>
-      
-      <Animated.View style={[
-        styles.collapsibleContent,
-        { maxHeight, opacity: height }
-      ]}>
-        {children}
-      </Animated.View>
-    </View>
-  );
-};
 
 // Reusable toggle component to ensure consistent formatting
 const PreferenceToggle = ({ title, description, value, onToggle, isLast = false }) => {
@@ -93,18 +58,161 @@ const PreferenceToggle = ({ title, description, value, onToggle, isLast = false 
   );
 };
 
+const AdminPushTokenSection = () => {
+  const [expoPushToken, setExpoPushToken] = useState(null); // Start as null
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setIsLoading(true);
+    setError('');
+    registerForPushNotificationsAsync()
+      .then(token => {
+        if (token && !token.startsWith('Error:') && token !== 'Permissions denied' && token !== 'Simulator: No token available') {
+          setExpoPushToken(token);
+        } else {
+          setError(token || 'Failed to get token'); // Display error or denial message
+          setExpoPushToken(null); // Ensure token is null on error/denial
+        }
+      })
+      .catch(err => { // Catch any unexpected errors from the promise itself
+        console.error('Unexpected error in registerForPushNotificationsAsync:', err);
+        setError(`Unexpected error: ${err.message}`);
+        setExpoPushToken(null);
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
+  }, []);
+
+  const handleCopy = async () => {
+    if (expoPushToken) {
+      await Clipboard.setStringAsync(expoPushToken);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  };
+
+  const renderTokenContent = () => {
+    if (isLoading) {
+      return <ActivityIndicator size="small" color={BRAND_COLORS.accent} />;
+    }
+    if (error) {
+      return <Text style={{ color: 'red', fontSize: 13 }}>{error}</Text>;
+    }
+    if (expoPushToken) {
+      return (
+        <>
+          <Text
+            selectable
+            style={{ fontSize: 13, color: 'blue', flex: 1, marginRight: 8 }}
+            numberOfLines={1}
+          >
+            {expoPushToken}
+          </Text>
+          <TouchableOpacity
+            onPress={handleCopy}
+            style={{ backgroundColor: '#eee', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 }}
+          >
+            <Text style={{ color: 'black', fontSize: 13 }}>
+              {copied ? 'Copied!' : 'Copy'}
+            </Text>
+          </TouchableOpacity>
+        </>
+      );
+    }
+    // Fallback case if something unexpected happens
+    return <Text style={{ color: 'gray', fontSize: 13 }}>Token unavailable</Text>; 
+  };
+
+  return (
+    <View style={{ padding: 10 }}>
+      <Text style={{ fontWeight: 'bold', marginBottom: 6 }}>Expo Push Token:</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 25 /* Ensure space for indicator/text */ }}>
+        {renderTokenContent()}
+      </View>
+      {error === 'Permissions denied' && (
+         <TouchableOpacity onPress={() => Linking.openSettings()} style={{marginTop: 5}}>
+             <Text style={{color: BRAND_COLORS.accent, fontSize: 12}}>Open Settings to Grant Permissions</Text>
+         </TouchableOpacity>
+      )}
+    </View>
+  );
+};
+
+async function registerForPushNotificationsAsync() {
+  let token;
+  if (!Device.isDevice) {
+    console.warn('Must use physical device for Push Notifications');
+    return null; 
+  }
+
+  try {
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+
+    if (existingStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+
+    if (finalStatus !== 'granted') {
+      console.warn('Push notification permissions denied!');
+      return 'Permissions denied'; 
+    }
+
+    // Get the token
+    token = (await Notifications.getExpoPushTokenAsync()).data;
+    console.log('Expo Push Token:', token);
+    return token;
+
+  } catch (error) {
+    console.error('Error getting push token:', error);
+    return `Error: ${error.message}`; 
+  }
+}
+
+// This is our collapsible section component, using the same pattern as ProfileSection
+const CollapsibleSection = ({ title, children }) => {
+  // Start collapsed by default
+  const [expanded, setExpanded] = useState(false);
+  
+  const toggleSection = () => {
+    setExpanded(prev => !prev);
+  };
+  
+  return (
+    <View style={styles.section}>
+      <TouchableOpacity 
+        style={styles.sectionHeader} 
+        onPress={toggleSection}
+        activeOpacity={0.6}
+      >
+        <Text style={styles.sectionTitle}>{title}</Text>
+        <Ionicons 
+          name={expanded ? "chevron-up" : "chevron-down"} 
+          size={24} 
+          color="#333" 
+        />
+      </TouchableOpacity>
+
+      {expanded && (
+        <View style={styles.sectionContent}>
+          {children}
+        </View>
+      )}
+    </View>
+  );
+};
+
 export default function SettingsScreen() {
   const { isLoggedIn, setIsLoggedIn, token, userId, logout } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [savingPreference, setSavingPreference] = useState(null);
-  
-  // Form fields
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [city, setCity] = useState('');
-  const [country, setCountry] = useState('');
+  const [tokenCheckDone, setTokenCheckDone] = useState(false);
   
   // Email preferences
   const [newsletters, setNewsletters] = useState(true);
@@ -117,33 +225,66 @@ export default function SettingsScreen() {
   const [artistUpdates, setArtistUpdates] = useState(true);
   const [appUpdates, setAppUpdates] = useState(true);
   
-  // First, make sure your preferences state is properly initialized:
+  // Renamed 'events' to 'eventNotifications' to avoid conflict
   const [preferences, setPreferences] = useState({
     newShows: false,
-    events: false,
-    marketingEmails: false,
+    eventNotifications: false,
     newsletters: false
   });
   
   // First, make sure you have the userProfile state defined at the top of your component:
-  const [userProfile, setUserProfile] = useState({
+  const [profileData, setProfileData] = useState({
     firstName: '',
     lastName: '',
     email: ''
   });
   
-  // Fetch user data
+  // Check token before any data fetch
   useEffect(() => {
-    if (isLoggedIn) {
+    const checkToken = async () => {
+      try {
+        // Check if token exists in SecureStore
+        const storedToken = await SecureStore.getItemAsync('userToken');
+        
+        if (!storedToken) {
+          console.log('No stored token found, redirecting to login');
+          setTokenCheckDone(true);
+          return;
+        }
+        
+        // If we get here, token exists, proceed with fetch
+        setTokenCheckDone(true);
+      } catch (error) {
+        console.error('Error checking token:', error);
+        setTokenCheckDone(true);
+      }
+    };
+    
+    checkToken();
+  }, []);
+  
+  // Fetch user data after token check is complete
+  useEffect(() => {
+    if (tokenCheckDone && isLoggedIn) {
       fetchUserData();
-    } else {
+    } else if (tokenCheckDone) {
       setLoading(false);
     }
-  }, [isLoggedIn]);
+  }, [tokenCheckDone, isLoggedIn]);
   
-  const fetchUserData = async () => {
+  const fetchUserData = useCallback(async () => {
     try {
       setLoading(true);
+      
+      // Check if token exists
+      if (!token) {
+        console.log('No token available for API request');
+        setLoading(false);
+        return;
+      }
+      
+      console.log('Fetching user data with token:', token.slice(0, 10) + '...');
+      
       const response = await axios.get(
         `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/users/me`,
         {
@@ -154,39 +295,44 @@ export default function SettingsScreen() {
         }
       );
       
-      console.log('User data from backend:', JSON.stringify(response.data, null, 2));
+      console.log('User data received:', response.data ? 'success' : 'empty');
       
       // Store user data
       setUser(response.data);
       
-      // Extract and map preferences - use a very explicit mapping approach
+      // Extract and map preferences
       const mappedPreferences = {
         newShows: response.data.notificationPreferences?.newShows === true,
-        events: response.data.emailPreferences?.eventUpdates === true,
-        marketingEmails: response.data.emailPreferences?.marketingEmails === true,
+        eventNotifications: response.data.emailPreferences?.eventUpdates === true,
         newsletters: response.data.emailPreferences?.newsletters === true
       };
-      
-      console.log('Initial preferences mapping:', mappedPreferences);
       
       // Set the initial preferences state
       setPreferences(mappedPreferences);
       
     } catch (error) {
       console.error('Error fetching user data:', error);
-      Alert.alert('Error', 'Failed to load your profile information');
+      
+      // Handle unauthorized errors
+      if (error.response && error.response.status === 401) {
+        console.log('Unauthorized access, clearing tokens');
+        // Clear tokens and redirect
+        await SecureStore.deleteItemAsync('userToken');
+        await AsyncStorage.removeItem('user');
+      } else {
+        Alert.alert('Error', 'Failed to load your profile information');
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
   
   const handleTogglePreference = async (key) => {
     try {
       // Define mappings
       const prefMappings = {
         'newShows': { field: 'notificationPreferences', key: 'newShows' },
-        'events': { field: 'emailPreferences', key: 'eventUpdates' },
-        'marketingEmails': { field: 'emailPreferences', key: 'marketingEmails' },
+        'eventNotifications': { field: 'emailPreferences', key: 'eventUpdates' },
         'newsletters': { field: 'emailPreferences', key: 'newsletters' }
       };
       
@@ -200,15 +346,13 @@ export default function SettingsScreen() {
       const currentValue = preferences[key] === true;
       const newValue = !currentValue;
       
-      console.log(`Toggling ${key} (${mapping.field}.${mapping.key}) from ${currentValue} to ${newValue}`);
-      
       // Store the previous preferences for rollback if needed
       const prevPreferences = {...preferences};
       
-      // Optimistically update UI for ONLY the changed toggle
+      // Optimistically update UI
       setPreferences(prev => ({
-        ...prev, // Keep all existing values
-        [key]: newValue // Only update the one that changed
+        ...prev,
+        [key]: newValue
       }));
       
       // Create update data
@@ -225,8 +369,6 @@ export default function SettingsScreen() {
         notificationPreferences: notificationPrefs,
         emailPreferences: emailPrefs
       };
-      
-      console.log('Sending update to backend:', JSON.stringify(updateData, null, 2));
       
       // Send update to backend
       const response = await axios.patch(
@@ -249,65 +391,60 @@ export default function SettingsScreen() {
         notificationPreferences: response.data.notificationPreferences || {}
       };
       
-      // This is critical - we need to properly map the entire response
-      // But keep our optimistic UI update for the toggle that just changed
       const updatedMappedPrefs = {
         newShows: updatedRawPrefs.notificationPreferences.newShows === true,
-        events: updatedRawPrefs.emailPreferences.eventUpdates === true,
-        marketingEmails: updatedRawPrefs.emailPreferences.marketingEmails === true,
+        eventNotifications: updatedRawPrefs.emailPreferences.eventUpdates === true,
         newsletters: updatedRawPrefs.emailPreferences.newsletters === true
       };
       
-      console.log('Backend response mapped to frontend:', updatedMappedPrefs);
-      
-      // Update our preferences state with all the values from the backend
+      // Update preferences state with all values from the backend
       setPreferences(updatedMappedPrefs);
       
     } catch (error) {
       console.error('Error updating preference:', error);
       
-      if (error.response) {
-        console.error('Error response:', error.response.data);
-        console.error('Status code:', error.response.status);
-      }
-      
-      // On error, revert to previous preferences state 
+      // On error, revert to previous preferences state
       setPreferences(prevPreferences);
       
-      Alert.alert(
-        'Update Failed',
-        'Failed to update notification preference. Please try again.'
-      );
+      if (error.response && error.response.status === 401) {
+        // Handle unauthorized errors
+        await SecureStore.deleteItemAsync('userToken');
+        await AsyncStorage.removeItem('user');
+        router.replace('/login');
+      } else {
+        Alert.alert(
+          'Update Failed',
+          'Failed to update preference. Please try again.'
+        );
+      }
     }
   };
   
-  const handleLogout = () => {
-    Alert.alert(
-      'Confirm Logout',
-      'Are you sure you want to log out?',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel'
-        },
-        {
-          text: 'Logout',
-          onPress: () => {
-            logout();
-            router.replace('/login');
-          }
-        }
-      ]
-    );
+  const handleLogout = async () => {
+    try {
+      await SecureStore.deleteItemAsync('userToken');
+      await AsyncStorage.removeItem('user');
+      // Call the logout function from the auth context
+      if (logout) {
+        logout();
+      }
+      router.replace('/login');
+      
+      // Clear saved credentials
+      await SecureStore.deleteItemAsync('userEmail');
+      await SecureStore.deleteItemAsync('userPassword');
+    } catch (error) {
+      console.error('Error during logout:', error);
+    }
   };
   
   // If not logged in, show login prompt
-  if (!isLoggedIn) {
+  if (!isLoggedIn && tokenCheckDone) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.notLoggedInContainer}>
           <Text style={styles.notLoggedInText}>
-            You need to be logged in to access settings
+            You need to be logged in to access your profile
           </Text>
           <TouchableOpacity
             style={styles.button}
@@ -331,56 +468,55 @@ export default function SettingsScreen() {
       </SafeAreaView>
     );
   }
-  
-  // Store preferences securely
-  const savePreferences = async () => {
-    await storeEncrypted('userPreferences', preferences);
+
+  // Inside your SettingsScreen component
+  // Add these state variables
+  const [biometricSupported, setBiometricSupported] = useState(false);
+  const [biometricType, setBiometricType] = useState('');
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+
+  // Add this useEffect to check biometric availability
+  useEffect(() => {
+    const checkBiometrics = async () => {
+      const biometricStatus = await isBiometricAvailable();
+      
+      if (biometricStatus.available) {
+        setBiometricSupported(true);
+        setBiometricType(biometricStatus.biometryType);
+        
+        // Load user's preference
+        const enabled = await getBiometricAuthEnabled();
+        setBiometricEnabled(enabled);
+      }
+    };
+    
+    checkBiometrics();
+  }, []);
+
+  // Add a function to handle toggling biometric auth
+  const handleToggleBiometricAuth = async (value) => {
+    await setBiometricAuthEnabled(value);
+    setBiometricEnabled(value);
   };
 
-  // Load preferences
-  const loadPreferences = async () => {
-    const savedPreferences = await getEncrypted('userPreferences');
-    if (savedPreferences) {
-      setPreferences(savedPreferences);
-    }
-  };
-
-  const resetOnboarding = async () => {
-    try {
-      await AsyncStorage.removeItem('hasSeenOnboarding');
-      // Restart app or navigate to index
-      router.replace('/');
-    } catch (error) {
-      console.error('Error resetting onboarding status:', error);
-    }
-  };
-  
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.contentContainer}>
         <View style={styles.header}>
-          <Text style={styles.title}>Settings</Text>
+          <Text style={styles.title}>My Profile</Text>
         </View>
         
-        {/* Profile Information Section */}
-        <CollapsibleSection title="Profile Information" initiallyExpanded={true}>
-          <View style={styles.profileInfo}>
-            <Text style={styles.profileLabel}>Name</Text>
-            <Text style={styles.profileValue}>
-              {user?.firstName ? `${user.firstName} ${user.lastName || ''}` : 'Not set'}
-            </Text>
-            
-            <Text style={styles.profileLabel}>Email</Text>
-            <Text style={styles.profileValue}>
-              {user?.email || 'Not set'}
-            </Text>
-          </View>
-        </CollapsibleSection>
+        {/* Use the ProfileSection component with isExpanded=false */}
+        <ProfileSection 
+          router={router} 
+          handleLogout={handleLogout} 
+          isExpanded={false}
+          token={token}
+        />
         
-        {/* App Notifications Section */}
+        {/* App Notifications Section - using the new CollapsibleSection */}
         <CollapsibleSection title="App Notifications">
           <View style={styles.preferencesContainer}>
-            {/* Using the reusable toggle component for consistent formatting */}
             <PreferenceToggle 
               title="New Shows"
               description="Get notified when new shows are added"
@@ -391,8 +527,8 @@ export default function SettingsScreen() {
             <PreferenceToggle 
               title="Events"
               description="Receive notifications about upcoming events"
-              value={preferences.events}
-              onToggle={() => handleTogglePreference('events')}
+              value={preferences.eventNotifications}
+              onToggle={() => handleTogglePreference('eventNotifications')}
               isLast={true}
             />
           </View>
@@ -401,13 +537,6 @@ export default function SettingsScreen() {
         {/* Email Preferences Section */}
         <CollapsibleSection title="Email Preferences">
           <View style={styles.preferencesContainer}>
-            <PreferenceToggle 
-              title="Marketing Emails"
-              description="Receive emails about our products and services"
-              value={preferences.marketingEmails}
-              onToggle={() => handleTogglePreference('marketingEmails')}
-            />
-            
             <PreferenceToggle 
               title="Newsletters"
               description="Receive our weekly newsletter"
@@ -445,8 +574,23 @@ export default function SettingsScreen() {
             </TouchableOpacity>
             
             <TouchableOpacity 
-              style={[styles.actionButton, styles.logoutButton]}
-              onPress={handleLogout}
+              style={[styles.actionButton, styles.logoutActionButton]}
+              onPress={() => {
+                Alert.alert(
+                  'Logout',
+                  'Are you sure you want to logout?',
+                  [
+                    {
+                      text: 'Cancel',
+                      style: 'cancel'
+                    },
+                    {
+                      text: 'Logout',
+                      onPress: handleLogout
+                    }
+                  ]
+                );
+              }}
             >
               <Ionicons name="log-out-outline" size={20} color={BRAND_COLORS.accent} />
               <Text style={styles.logoutText}>Logout</Text>
@@ -467,6 +611,26 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         </CollapsibleSection>
+        
+        {/* Admin Section */}
+        <CollapsibleSection title="Admin">
+          <AdminPushTokenSection />
+        </CollapsibleSection>
+        
+        {/* Security Section */}
+        {biometricSupported && (
+          <CollapsibleSection title="Security">
+            <View style={styles.preferencesContainer}>
+              <PreferenceToggle 
+                title={`${biometricType} Login`}
+                description={`Use ${biometricType} to login to your account`}
+                value={biometricEnabled}
+                onToggle={handleToggleBiometricAuth}
+                isLast={true}
+              />
+            </View>
+          </CollapsibleSection>
+        )}
         
         <Text style={styles.versionText}>Version 1.0.0</Text>
       </ScrollView>
@@ -496,10 +660,39 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: BRAND_COLORS.accent,
   },
-  profileInfo: {
-    padding: 15,
+  // Section styles - same as in ProfileSection
+  section: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    marginBottom: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#eee',
+    width: '100%',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 14,
+    backgroundColor: '#fff',
+  },
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: BRAND_COLORS.black,
+  },
+  sectionContent: {
     borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
+    borderTopColor: '#eee',
+    backgroundColor: '#F9F9F9',
+  },
+  // Other styles
+  profileContainer: {
+    padding: 15,
+  },
+  profileInfo: {
+    marginBottom: 15,
   },
   profileLabel: {
     fontSize: 14,
@@ -508,19 +701,20 @@ const styles = StyleSheet.create({
   },
   profileValue: {
     fontSize: 16,
-    color: '#333',
-    marginBottom: 16,
+    color: BRAND_COLORS.black,
+    fontWeight: '500',
   },
   preferencesContainer: {
-    padding: 15,
+    padding: 0,
   },
   settingItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 12,
+    paddingHorizontal: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#eee',
   },
   settingTextContainer: {
     flex: 1,
@@ -536,37 +730,35 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 2,
   },
+  accountContainer: {
+    padding: 0,
+  },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
+    paddingHorizontal: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#eee',
+  },
+  actionButtonText: {
+    flex: 1,
+    fontSize: 16,
+    color: BRAND_COLORS.black,
+    marginLeft: 10,
   },
   lastActionButton: {
     borderBottomWidth: 0,
   },
-  actionButtonText: {
-    flex: 1,
-    marginLeft: 12,
-    fontSize: 16,
-    color: BRAND_COLORS.black,
-  },
-  logoutButton: {
+  logoutActionButton: {
     borderBottomWidth: 0,
   },
   logoutText: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 10,
     fontSize: 16,
     color: BRAND_COLORS.accent,
     fontWeight: '500',
-  },
-  versionText: {
-    textAlign: 'center',
-    color: 'gray',
-    fontSize: 12,
-    marginTop: 16,
   },
   loadingContainer: {
     flex: 1,
@@ -604,36 +796,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  collapsibleSection: {
-    backgroundColor: '#fff',
-    margin: 10,
-    borderRadius: 10,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 15,
-    backgroundColor: '#fff',
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  collapsibleContent: {
-    overflow: 'hidden',
-  },
-  accountContainer: {
-    padding: 15,
+  versionText: {
+    textAlign: 'center',
+    color: 'gray',
+    fontSize: 12,
+    marginTop: 16,
   },
 }); 

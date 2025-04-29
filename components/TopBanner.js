@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Dimensions } from 'react-native';
+import React, { useState, useEffect, useRef} from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Dimensions, Platform} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { usePlayer } from '../app/context/PlayerContext';
 import { useRouter } from 'expo-router';
@@ -79,6 +79,8 @@ export default function TopBanner() {
 
 const styles = StyleSheet.create({
   topBannerContainer: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 80 : 60,
     backgroundColor: BRAND_COLORS.background,
     paddingVertical: 12,
     paddingHorizontal: 15,

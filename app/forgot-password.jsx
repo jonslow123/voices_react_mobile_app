@@ -63,6 +63,13 @@ export default function ForgotPasswordScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
       >
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => router.back()}
+        >
+          <Ionicons name="arrow-back" size={28} color={BRAND_COLORS.accent} />
+        </TouchableOpacity>
+
         <View style={styles.logoContainer}>
           <Image
             source={require('../assets/logo.png')}
@@ -72,14 +79,6 @@ export default function ForgotPasswordScreen() {
         </View>
 
         <View style={styles.formContainer}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <Ionicons name="arrow-back" size={24} color={BRAND_COLORS.primaryText} />
-            <Text style={styles.backButtonText}>Back to Login</Text>
-          </TouchableOpacity>
-
           <Text style={styles.title}>Reset Your Password</Text>
           
           {!resetSent ? (
@@ -149,7 +148,8 @@ const styles = StyleSheet.create({
   logoContainer: {
     alignItems: 'center',
     marginBottom: 20,
-    paddingTop: Platform.OS === 'ios' ? 50 : 30,
+    marginTop: 80,
+    paddingTop: 0,
   },
   logo: {
     width: 200,
@@ -163,20 +163,21 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   backButton: {
-    flexDirection: 'row',
+    position: 'absolute',
+    top: 80, // Match the logoContainer marginTop
+    left: 20,
+    zIndex: 10,
+    height: 40,
+    width: 40,
     alignItems: 'center',
-    marginBottom: 20,
-  },
-  backButtonText: {
-    marginLeft: 8,
-    fontSize: 16,
-    color: BRAND_COLORS.primaryText,
+    justifyContent: 'center',
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 16,
     color: BRAND_COLORS.accent,
+    textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
@@ -201,7 +202,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     fontSize: 16,
     backgroundColor: '#fff',
-    color: BRAND_COLORS.primaryText,
+    color: BRAND_COLORS.black,
   },
   button: {
     backgroundColor: BRAND_COLORS.accent,

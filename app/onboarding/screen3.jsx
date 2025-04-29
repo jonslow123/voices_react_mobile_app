@@ -32,9 +32,9 @@ export default function Screen3() {
           <Ionicons name="people-outline" size={120} color={BRAND_COLORS.accent} />
         </View>
         
-        <Text style={styles.title}>Subscribe to Artists</Text>
+        <Text style={styles.title}>Navigating your app</Text>
         <Text style={styles.description}>
-          Follow your favorite presenters and receive notifications when they go live or upload new content.
+          Follow your favourite artists on our Explore page to get notified when they go live! Manage your notification and email preferences in the 'My Profile' page. 
         </Text>
         
         <View style={styles.paginationContainer}>

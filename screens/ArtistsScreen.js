@@ -58,15 +58,17 @@ const ArtistsScreen = ({ navigation }) => {
   useEffect(() => {
     if (hosts.length > 0) {
       const genresSet = new Set();
+      
+      // Only collect genres that actually exist in the current data
       hosts.forEach(host => {
         if (host.genres && host.genres.length > 0) {
           host.genres.forEach(genre => genresSet.add(genre));
         }
-        if (host.allGenres && host.allGenres.length > 0) {
-          host.allGenres.forEach(genre => genresSet.add(genre.name));
-        }
       });
-      setAllGenres(Array.from(genresSet).sort());
+      
+      // Convert to array and sort alphabetically
+      const uniqueGenres = Array.from(genresSet).sort();
+      setAllGenres(uniqueGenres);
     }
   }, [hosts]);
 

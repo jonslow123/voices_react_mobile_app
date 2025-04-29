@@ -3,7 +3,6 @@ import { View, StyleSheet, SafeAreaView, StatusBar, Platform } from 'react-nativ
 import { Stack, Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
-import TopBanner from '../../../components/TopBanner';
 import MiniPlayer from '../../../components/MiniPlayer';
 import { Dimensions } from 'react-native';
 const { width, height } = Dimensions.get('window');
@@ -43,10 +42,10 @@ export default function ArtistDetailLayout() {
             }}
           />
           <Tabs.Screen
-            name="membership"
+            name="settings"
             options={{
-              title: 'Membership',
-              tabBarIcon: ({ color }) => <Ionicons name="card" size={24} color={color} />,
+              title: 'My Profile',
+              tabBarIcon: ({ color }) => <Ionicons name="cog" size={24} color={color} />,
             }}
           />
         </Tabs.Navigator>

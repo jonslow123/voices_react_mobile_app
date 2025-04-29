@@ -78,6 +78,7 @@ export async function registerForPushNotifications() {
         token = (await Notifications.getExpoPushTokenAsync({
           projectId: projectId,
         })).data;
+        console.log('Token:', token);
       } else {
         // No valid projectId, try the default approach
         console.log('Using default method for token');
@@ -103,7 +104,7 @@ export async function registerForPushNotifications() {
       try {
         console.log('Trying fallback token method...');
         token = (await Notifications.getExpoPushTokenAsync({
-          experienceId: '@anonymous/your-app-slug'  // Replace with your actual app slug
+          experienceId: '@anonymous/voices-app'
         })).data;
         
         await AsyncStorage.setItem('pushToken', token);

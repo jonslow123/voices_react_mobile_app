@@ -10,7 +10,8 @@ import {
   SafeAreaView,
   Platform,
   Alert,
-  Dimensions
+  Dimensions,
+  Share
 } from 'react-native';
 import { getValidToken } from '../utils/tokenManager';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,18 +23,21 @@ import { usePlayer } from '../context/PlayerContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BRAND_COLORS } from '../styles/brandColors';
 import secureApi from '../../app/utils/api';
+import * as SecureStore from 'expo-secure-store';
 const { width, height } = Dimensions.get('window');
 const ArtistDetailsScreen = () => {
-  const { username, name, imageUrl } = useLocalSearchParams();
+  const { username, name, imageUrl, bio } = useLocalSearchParams();
   const router = useRouter();
   const [shows, setShows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const { handleTilePress, activeTileId, isPlaying } = usePlayer();
+  const { handleTilePress, activeTileId, isPlaying, togglePlayback, webViewRef, currentTrack } = usePlayer();
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [checkingSubscription, setCheckingSubscription] = useState(true);
   const [subscribing, setSubscribing] = useState(false);
-
+  const [artistBio, setArtistBio] = useState(bio || "");
+  const [currentPlayingKey, setCurrentPlayingKey] = useState(null);
+  const mixcloudPlayerRef = useRef(null);
   
   // Get status bar height
   const statusBarHeight = Constants.statusBarHeight || 0;
@@ -42,8 +46,25 @@ const ArtistDetailsScreen = () => {
     React.useCallback(() => {
       fetchArtistShows();
       checkSubscriptionStatus();
+      // If bio wasn't passed in params, we could fetch it here
+      if (!bio) {
+        fetchArtistBio();
+      }
     }, [username])
   );
+
+  const fetchArtistBio = async () => {
+    // This is a placeholder function - implement the actual API call to get artist bio
+    // For example:
+    try {
+      const response = await secureApi.get(`https://api.mixcloud.com/${username}/`);
+      if (response.data && response.data.biog) {
+        setArtistBio(response.data.biog);
+      }
+    } catch (err) {
+      console.error('Failed to load artist bio:', err);
+    }
+  };
 
   const fetchArtistShows = async () => {
     try {
@@ -58,20 +79,65 @@ const ArtistDetailsScreen = () => {
     }
   };
 
+  const checkAuth = async () => {
+    try {
+      // Try to get the token directly from storage
+      let token = await AsyncStorage.getItem('userToken');
+      
+      // If no token in AsyncStorage, check SecureStore if available
+      if (!token && SecureStore) {
+        try {
+          token = await SecureStore.getItemAsync('userToken');
+        } catch (e) {
+          console.log('SecureStore error:', e);
+        }
+      }
+      
+      // Check the token's validity manually
+      if (token) {
+        try {
+          // Make a test API call to verify token
+          const response = await axios.get(
+            `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/users/me`,
+            {
+              headers: { 
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          
+          if (response.status === 200) {
+            console.log('Token valid, user authenticated');
+            return token; // Return the valid token
+          }
+        } catch (e) {
+          console.log('Token validation failed:', e);
+        }
+      }
+      
+      console.log('No valid token found in storage');
+      return null;
+    } catch (error) {
+      console.error('Auth check error:', error);
+      return null;
+    }
+  };
+
   const checkSubscriptionStatus = async () => {
     try {
       console.log('Checking subscription status for artist:', username);
       setCheckingSubscription(true);
       
-      // Use getValidToken instead of AsyncStorage.getItem
-      const token = await getValidToken();
+      // Use our direct auth check instead of getValidToken
+      const token = await checkAuth();
       
       if (!token) {
-        console.log('No valid token available');
+        console.log('No valid token available for subscription check');
         setCheckingSubscription(false);
         return;
       }
-  
+
       const response = await axios.get(
         `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/users/me`,
         {
@@ -83,20 +149,15 @@ const ArtistDetailsScreen = () => {
       );
       
       // Flatten the nested arrays and check if the username exists
-      const subscribedArtists = response.data.artistsSubscribed.flat();
+      const subscribedArtists = response.data.artistsSubscribed ? response.data.artistsSubscribed.flat() : [];
       console.log('Flattened subscribed artists:', subscribedArtists);
       
       const isArtistSubscribed = subscribedArtists.includes(username);
       console.log('Is artist subscribed?:', isArtistSubscribed);
-  
+
       setIsSubscribed(isArtistSubscribed);
     } catch (error) {
       console.error('Error checking subscription status:', error);
-      
-      // Check if it's an authentication error
-      if (error.response?.status === 401) {
-        router.replace('/login');
-      }
     } finally {
       setCheckingSubscription(false);
     }
@@ -107,16 +168,34 @@ const ArtistDetailsScreen = () => {
     try {
       setSubscribing(true);
       
-      // Use getValidToken instead of AsyncStorage.getItem
-      const token = await getValidToken();
+      // Use our direct auth check
+      const token = await checkAuth();
       
       if (!token) {
-        Alert.alert('Login Required', 'Please log in to subscribe to artists');
-        router.replace('/login');
+        console.log('No valid token when subscribing to artist:', username);
+        Alert.alert(
+          'Login Required', 
+          'Please log in to subscribe to artists',
+          [
+            { 
+              text: 'Cancel', 
+              style: 'cancel' 
+            },
+            { 
+              text: 'Login', 
+              onPress: () => {
+                // Navigate to login using a more reliable method
+                router.navigate('/login');
+              } 
+            }
+          ]
+        );
         return;
       }
   
       const endpoint = isSubscribed ? 'unsubscribe' : 'subscribe';
+      console.log(`Attempting to ${endpoint} from artist:`, username);
+      
       const response = await axios.post(
         `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/users/${endpoint}/${username}`,
         {},
@@ -130,8 +209,9 @@ const ArtistDetailsScreen = () => {
       
       console.log(`${endpoint} response:`, response.data);
       
-      // Update the subscription status
+      // Update subscription status
       setIsSubscribed(!isSubscribed);
+      
     } catch (error) {
       console.error('Error updating subscription:', error);
       
@@ -140,7 +220,10 @@ const ArtistDetailsScreen = () => {
         Alert.alert(
           'Session Expired',
           'Your session has expired. Please log in again.',
-          [{ text: 'OK', onPress: () => router.replace('/login') }]
+          [{ 
+            text: 'OK', 
+            onPress: () => router.navigate('/login')
+          }]
         );
         return;
       }
@@ -151,6 +234,29 @@ const ArtistDetailsScreen = () => {
       );
     } finally {
       setSubscribing(false);
+    }
+  };
+
+  const handleShare = async () => {
+    try {
+      const result = await Share.share({
+        message: `Check out ${name} on Voices Radio!`,
+        url: `https://mixcloud.com/${username}`,
+        title: `Voices Radio - ${name}`
+      });
+      
+      if (result.action === Share.sharedAction) {
+        if (result.activityType) {
+          console.log('Shared with activity type:', result.activityType);
+        } else {
+          console.log('Shared successfully');
+        }
+      } else if (result.action === Share.dismissedAction) {
+        console.log('Share dismissed');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Could not share this artist');
+      console.error('Share error:', error);
     }
   };
 
@@ -171,13 +277,33 @@ const ArtistDetailsScreen = () => {
     router.push(`/(tabs)/${tabName}`);
   };
 
+  // New function that wraps the handleTilePress from context
+  const handleShowTilePress = (tileData, index) => {
+    if (activeTileId === tileData._id && isPlaying) {
+      // If this is the active tile and it's playing, pause it
+      togglePlayback();
+    } else {
+      // Otherwise, play this tile using the global handler
+      handleTilePress(tileData, index);
+    }
+  };
+
+  // Listen for player state changes from the context
+  useEffect(() => {
+    // This effect syncs the global player state with our local UI
+    if (activeTileId) {
+      setCurrentPlayingKey(activeTileId);
+    } else {
+      setCurrentPlayingKey(null);
+    }
+  }, [activeTileId, isPlaying]);
+
   return (
     <View style={styles.container}>
       <SafeAreaView style={{
         backgroundColor: 'black',
         paddingTop: Platform.OS === 'ios' ? statusBarHeight : 0,
       }}>
-        <TopBanner />
       </SafeAreaView>
       
       <ScrollView 
@@ -199,29 +325,59 @@ const ArtistDetailsScreen = () => {
               resizeMode="cover"
             />
             
-            <Text style={styles.profileName}>{name}</Text>
-            
-            {!checkingSubscription && (
-              <TouchableOpacity 
-                style={[
-                  styles.subscribeButton,
-                  isSubscribed && styles.subscribedButton
-                ]}
-                onPress={handleSubscribe}
-              >
-                <Ionicons 
-                  name={isSubscribed ? "heart" : "heart-outline"} 
-                  size={20} 
-                  color={isSubscribed ? BRAND_COLORS.background : BRAND_COLORS.accent} 
-                />
-                <Text style={[
-                  styles.subscribeText,
-                  isSubscribed && styles.subscribedText
-                ]}>
-                  {isSubscribed ? 'Subscribed' : 'Subscribe'}
-                </Text>
-              </TouchableOpacity>
-            )}
+            <View style={styles.profileActions}>
+              <Text style={styles.profileName}>{name}</Text>
+              
+              <View style={styles.actionButtons}>
+                {!checkingSubscription && (
+                  <TouchableOpacity 
+                    style={[
+                      styles.subscribeButton,
+                      isSubscribed && styles.subscribedButton
+                    ]}
+                    onPress={handleSubscribe}
+                    disabled={subscribing}
+                  >
+                    {subscribing ? (
+                      <ActivityIndicator size="small" color={isSubscribed ? BRAND_COLORS.background : BRAND_COLORS.accent} />
+                    ) : (
+                      <>
+                        <Ionicons 
+                          name={isSubscribed ? "heart" : "heart-outline"} 
+                          size={20} 
+                          color={isSubscribed ? BRAND_COLORS.background : BRAND_COLORS.accent} 
+                        />
+                        <Text style={[
+                          styles.subscribeText,
+                          isSubscribed && styles.subscribedText
+                        ]}>
+                          {isSubscribed ? 'Subscribed' : 'Subscribe'}
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+                
+                <TouchableOpacity 
+                  style={styles.shareButton}
+                  onPress={handleShare}
+                >
+                  <Ionicons 
+                    name="share-social-outline" 
+                    size={20} 
+                    color={BRAND_COLORS.accent} 
+                  />
+                  <Text style={styles.shareButtonText}>Share</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {artistBio ? (
+                <View style={styles.bioContainer}>
+                  <Text style={styles.bioTitle}>About</Text>
+                  <Text style={styles.bioText}>{artistBio}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
         </View>
         
@@ -259,11 +415,14 @@ const ArtistDetailsScreen = () => {
                 iframeUrl: `https://player-widget.mixcloud.com/widget/iframe/?hide_cover=1&mini=1&light=1&feed=${encodeURIComponent(show.key)}`
               };
 
+              // Check if this tile is the currently playing one
+              const isThisTilePlaying = activeTileId === show.key && isPlaying;
+
               return (
                 <TouchableOpacity 
                   key={show.key}
                   style={styles.showCard}
-                  onPress={() => handleTilePress(tileData, index)}
+                  onPress={() => handleShowTilePress(tileData, index)}
                 >
                   <Image 
                     source={{ uri: show.pictures.extra_large }} 
@@ -275,7 +434,7 @@ const ArtistDetailsScreen = () => {
                     <Text style={styles.showDate}>{formatDate(show.created_time)}</Text>
                     <TouchableOpacity 
                       style={styles.playButton}
-                      onPress={() => handleTilePress(tileData, index)}
+                      onPress={() => handleShowTilePress(tileData, index)}
                     >
                     </TouchableOpacity>
                   </View>
@@ -333,45 +492,124 @@ const styles = StyleSheet.create({
   },
   headerSection: {
     width: '100%',
-    marginBottom: 20,
+    marginBottom: 10,
     position: 'relative',
   },
   backButton: {
     position: 'absolute',
-    left: 0,
-    top: 0,
-    padding: 12,
-    zIndex: 10,  // Ensure it's above other content
+    left: 10,
+    top: 10,
+    padding: 10,
+    zIndex: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 20,
   },
   profileSection: {
     width: '100%',
     alignItems: 'center',
-    paddingTop: 10,
-    marginBottom: 10,
+    marginTop: -20,
+    marginBottom: 0,
   },
   profileImage: {
-    width: 120,  // Larger size since it's the main profile image
-    height: 120,
-    borderRadius: 60,
-    marginBottom: 16,
+    width: width,
+    height: width * 0.75,
+    borderRadius: 0,
+    marginBottom: -10, // No margin since profile actions will be below
+    borderWidth: 0,
+  },
+  profileActions: {
+    width: '100%',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    paddingBottom: 10,
   },
   profileName: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: 'bold',
     color: BRAND_COLORS.primaryText,
     textAlign: 'center',
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
     marginBottom: 16,
-    color: BRAND_COLORS.primaryText,
   },
-  loadingContainer: {
-    flex: 1,
+  actionButtons: {
+    flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
+    marginBottom: 20,
+  },
+  subscribeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    borderColor: BRAND_COLORS.accent,
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginRight: 10,
+  },
+  subscribedButton: {
+    backgroundColor: BRAND_COLORS.accent,
+    borderColor: BRAND_COLORS.accent,
+  },
+  subscribeText: {
+    marginLeft: 8,
+    fontSize: 16,
+    color: BRAND_COLORS.accent,
+    fontWeight: '600',
+  },
+  subscribedText: {
+    color: BRAND_COLORS.background,
+  },
+  shareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    borderColor: BRAND_COLORS.accent,
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  shareButtonText: {
+    marginLeft: 8,
+    fontSize: 16,
+    color: BRAND_COLORS.accent,
+    fontWeight: '600',
+  },
+  bioContainer: {
+    marginTop: 10,
+    paddingTop: 16,
+    paddingBottom: 0,
+    borderTopWidth: 1,
+    borderTopColor: BRAND_COLORS.background === '#FFFFFF' ? '#EEEEEE' : '#333333',
+  },
+  bioTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: BRAND_COLORS.primaryText,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  bioText: {
+    fontSize: 16,
+    color: BRAND_COLORS.primaryText,
+    lineHeight: 24,
+    textAlign: 'center',
+    marginBottom: 0,
+  },
+  sectionTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginTop: 0,
+    marginBottom: 20,
+    color: BRAND_COLORS.primaryText,
+    paddingHorizontal: 20,
+    textAlign: 'center',
+  },
+  loadingContainer: {
+    paddingVertical: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   loadingText: {
     marginTop: 12,
@@ -379,10 +617,9 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   errorContainer: {
-    flex: 1,
+    paddingVertical: 40,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
     padding: 16,
   },
   errorText: {
@@ -393,7 +630,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   retryButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: BRAND_COLORS.accent,
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
@@ -404,10 +641,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   emptyContainer: {
-    flex: 1,
+    paddingVertical: 40,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
   },
   emptyText: {
     fontSize: 16,
@@ -415,78 +651,55 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   showsList: {
-    marginBottom: 24,
+    marginBottom: 30,
+    paddingHorizontal: 20,
   },
   showCard: {
-    flexDirection: 'row',
-    backgroundColor: 'white',
-    borderRadius: 10,
-    marginBottom: 16,
+    flexDirection: 'column',
+    backgroundColor: BRAND_COLORS.background === '#FFFFFF' ? '#F5F5F5' : '#1A1A1A',
+    borderRadius: 12,
+    marginBottom: 24,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 3,
     },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 5,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: BRAND_COLORS.background === '#FFFFFF' ? '#EEEEEE' : '#333333',
   },
   showImage: {
-    width: 100,
-    height: 100,
+    width: '100%',
+    height: width * 0.5,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
   },
   showInfo: {
-    flex: 1,
-    padding: 12,
-    justifyContent: 'space-between',
+    padding: 16,
+    paddingBottom: 20,
   },
   showName: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
+    color: BRAND_COLORS.primaryText,
+    marginBottom: 8,
   },
   showDate: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 16,
+    color: BRAND_COLORS.primaryText === '#000000' ? '#666666' : '#BBBBBB',
+    marginBottom: 16,
   },
   playButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  playButtonText: {
-    fontSize: 14,
-    color: '#007AFF',
-    marginLeft: 8,
-  },
-  subscribeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: BRAND_COLORS.accent,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    marginTop: 12,
-  },
-  subscribedButton: {
-    backgroundColor: BRAND_COLORS.accent,
-    borderColor: BRAND_COLORS.accent,
-  },
-  subscribeText: {
-    marginLeft: 6,
-    fontSize: 16,
-    color: BRAND_COLORS.accent,
-    fontWeight: '600',
-  },
-  subscribedText: {
-    color: BRAND_COLORS.background,
+    alignSelf: 'flex-end',
+    marginTop: 6,
   },
   scrollContent: {
-    padding: 16,
-    paddingTop: 20, // Add padding at the top for content
-    paddingBottom: Platform.OS === 'ios' ? 100 : 80, // Add padding for tab bar
+    padding: 0,
+    paddingTop: 0,
+    paddingBottom: Platform.OS === 'ios' ? 100 : 80,
   },
   tabBar: {
     flexDirection: 'row',

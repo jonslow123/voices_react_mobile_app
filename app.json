@@ -6,11 +6,11 @@
     "entryPoint": "./index.js",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/appicon.png",
     "scheme": "voicesradio",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/images/splash.png",
+      "image": "./assets/appicon.png",
       "resizeMode": "contain",
       "backgroundColor": "#e5d7be"
     },
@@ -26,11 +26,19 @@
       "buildNumber": "1.0.0",
       "associatedDomains": [
         "applinks:auth.voicesradio.co.uk"
-      ]
+      ],
+      "entitlements": {
+        "aps-environment": "development"
+      },
+      "infoPlist": {
+        "UIBackgroundModes": ["audio"],
+        "NSFaceIDUsageDescription": "This app may use Face ID to authenticate the user and auto-fill saved passwords."
+      },
+      "usesApnsToken": true
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "foregroundImage": "./assets/appicon.png",
         "backgroundColor": "#e5d7be"
       },
       "package": "com.anonymous.voices-app",
@@ -51,12 +59,13 @@
             "DEFAULT"
           ]
         }
-      ]
+      ],
+      "permissions": ["FOREGROUND_SERVICE"]
     },
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/appicon.png"
     },
     "experiments": {
       "typedRoutes": true
@@ -66,7 +75,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/notification-icon.png",
+          "icon": "./assets/appicon.png",
           "color": "#ffffff",
           "sounds": [
             "./assets/notification-sound.wav"

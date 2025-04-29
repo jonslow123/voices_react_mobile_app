@@ -22,9 +22,9 @@ export default function Screen1() {
           <Ionicons name="radio-outline" size={120} color={BRAND_COLORS.accent} />
         </View>
         
-        <Text style={styles.title}>Discover Live Radio</Text>
+        <Text style={styles.title}>Welcome</Text>
         <Text style={styles.description}>
-          Listen to your favorite shows and presenters on Voices Radio, anytime and anywhere.
+          Welcome to the Voices family and the Voices Radio app! Here you can listen to your favorite shows and presenters, anytime and anywhere.
         </Text>
         
         <View style={styles.paginationContainer}>

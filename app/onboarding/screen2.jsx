@@ -83,13 +83,13 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     paddingHorizontal: 24,
+    paddingTop: 40,
   },
   logoContainer: {
-    position: 'absolute',
-    top: 40,
     alignItems: 'center',
+    marginBottom: 40,
   },
   logo: {
     width: 150,

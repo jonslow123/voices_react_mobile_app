@@ -7,6 +7,7 @@ import TopBanner from '../../components/TopBanner';
 import MiniPlayer from '../../components/MiniPlayer';
 import { BRAND_COLORS } from '../styles/brandColors';
 import { Dimensions } from 'react-native';
+import { PlayerContextProvider } from '../context/PlayerContext';
 const { width, height } = Dimensions.get('window');
 
 export default function TabLayout() {
@@ -14,67 +15,68 @@ export default function TabLayout() {
   const statusBarHeight = Constants.statusBarHeight || 0;
   
   return (
-    <View style={styles.container}>
-      <SafeAreaView style={{
-        backgroundColor: 'black', // Match your TopBanner background color
-        paddingTop: Platform.OS === 'ios' ? Constants.statusBarHeight || 0 : 0,
-      }}>
-        <TopBanner />
-      </SafeAreaView>
-      {/* Status bar with light content on dark background */}
-      <StatusBar barStyle="light-content" backgroundColor="#000" />
-      
-      {/* Use SafeAreaView with proper padding */}
-      <SafeAreaView style={{ 
-        backgroundColor: '#000',
-        paddingTop: Platform.OS === 'ios' ? statusBarHeight : 0,
-      }}>
-      </SafeAreaView>
-      
-      <Tabs
-        screenOptions={{
-          headerShown: false,
-          tabBarActiveTintColor: BRAND_COLORS.accent,
-          tabBarStyle: {
-            height: Platform.OS === 'ios' ? 80 : 60, 
-            paddingBottom: Platform.OS === 'ios' ? 25 : 10,
-            paddingTop: 5,
-            borderTopWidth: 0,
-            elevation: 0,
-            backgroundColor: BRAND_COLORS.background,
-          },
-          tabBarLabelStyle: {
-            marginBottom: Platform.OS === 'ios' ? 8 : 5, 
-          },
-          tabBarIconStyle: {
-            marginTop: 5, 
-          }
-        }}
-      >
-        <Tabs.Screen
-          name="index"
-          options={{
-            title: 'Home',
-            tabBarIcon: ({ color }) => <Ionicons name="home" size={24} color={color} />,
+    <PlayerContextProvider>
+      <View style={styles.container}>
+        <SafeAreaView style={{
+          backgroundColor: 'black', // Match your TopBanner background color
+          paddingTop: Platform.OS === 'ios' ? Constants.statusBarHeight || 0 : 0,
+        }}>
+        </SafeAreaView>
+        {/* Status bar with light content on dark background */}
+        <StatusBar barStyle="light-content" backgroundColor="#000" />
+        
+        {/* Use SafeAreaView with proper padding */}
+        <SafeAreaView style={{ 
+          backgroundColor: '#000',
+          paddingTop: Platform.OS === 'ios' ? statusBarHeight : 0,
+        }}>
+        </SafeAreaView>
+        
+        <Tabs
+          screenOptions={{
+            headerShown: false,
+            tabBarActiveTintColor: BRAND_COLORS.accent,
+            tabBarStyle: {
+              height: Platform.OS === 'ios' ? 80 : 60, 
+              paddingBottom: Platform.OS === 'ios' ? 25 : 10,
+              paddingTop: 5,
+              borderTopWidth: 0,
+              elevation: 0,
+              backgroundColor: BRAND_COLORS.background,
+            },
+            tabBarLabelStyle: {
+              marginBottom: Platform.OS === 'ios' ? 8 : 5, 
+            },
+            tabBarIconStyle: {
+              marginTop: 5, 
+            }
           }}
-        />
-        <Tabs.Screen
-          name="artists"
-          options={{
-            title: 'Explore',
-            tabBarIcon: ({ color }) => <Ionicons name="search" size={24} color={color} />,
-          }}
-        />
-        <Tabs.Screen
-          name="settings"
-          options={{
-            title: 'Settings',
-            tabBarIcon: ({ color }) => <Ionicons name="cog" size={24} color={color} />,
-          }}
-        />
-      </Tabs>
-      <MiniPlayer />
-    </View>
+        >
+          <Tabs.Screen
+            name="index"
+            options={{
+              title: 'Home',
+              tabBarIcon: ({ color }) => <Ionicons name="home" size={24} color={color} />,
+            }}
+          />
+          <Tabs.Screen
+            name="artists"
+            options={{
+              title: 'Explore',
+              tabBarIcon: ({ color }) => <Ionicons name="search" size={24} color={color} />,
+            }}
+          />
+          <Tabs.Screen
+            name="settings"
+            options={{
+              title: 'My Profile',
+              tabBarIcon: ({ color }) => <Ionicons name="cog" size={24} color={color} />,
+            }}
+          />
+        </Tabs>
+        <MiniPlayer />
+      </View>
+    </PlayerContextProvider>
   );
 }
 

@@ -6,7 +6,7 @@ export function ScrollProvider({ children }) {
   const [scrollPositions, setScrollPositions] = useState({
     artists: 0,
     home: 0,
-    membership: 0
+    settings: 0
   });
 
   const updateScrollPosition = (screen, position) => {

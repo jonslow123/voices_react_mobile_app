@@ -237,20 +237,22 @@ export function PlayerContextProvider({ children }) {
 
   // Function to handle tile press from any screen
   const handleTilePress = (item, index) => {
-    // Check if the same track is already playing
+    // Set miniPlayerVisible to true explicitly
+    setMiniPlayerVisible(true);
+    
+    // Check if it's the same track
     if (currentTrack && currentTrack._id === item._id) {
-      // Toggle play/pause if it's the same track
+      // Toggle play/pause
       togglePlayback();
     } else {
       // Start playing a new track
       setCurrentTrack(item);
       setActiveTileIndex(index);
       setActiveTileId(item._id);
-      setMiniPlayerVisible(true);
       setCurrentPlayingUrl(item.iframeUrl);
       setIsPlaying(true);
       
-      // Stop header sound if it's playing
+      // Stop header if playing
       if (isHeaderPlaying) {
         setIsHeaderPlaying(false);
       }

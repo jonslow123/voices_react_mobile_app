@@ -1,4 +1,29 @@
-import EncryptedStorage from 'react-native-encrypted-storage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+let EncryptedStorage;
+try {
+  EncryptedStorage = require('react-native-encrypted-storage').default;
+} catch (error) {
+  console.warn('EncryptedStorage not available, falling back to AsyncStorage');
+  // Create a fallback that uses AsyncStorage
+  EncryptedStorage = {
+    setItem: async (key, value) => {
+      return AsyncStorage.setItem(`encrypted_${key}`, value);
+    },
+    getItem: async (key) => {
+      return AsyncStorage.getItem(`encrypted_${key}`);
+    },
+    removeItem: async (key) => {
+      return AsyncStorage.removeItem(`encrypted_${key}`);
+    },
+    clear: async () => {
+      // Only clear items with our prefix
+      const keys = await AsyncStorage.getAllKeys();
+      const encryptedKeys = keys.filter(key => key.startsWith('encrypted_'));
+      return AsyncStorage.multiRemove(encryptedKeys);
+    }
+  };
+}
 
 export const storeEncrypted = async (key, value) => {
   try {
@@ -48,6 +73,8 @@ export const clearEncryptedStorage = async () => {
     return false;
   }
 };
+
+export { EncryptedStorage };
 
 export default function DummyComponent() {
     return null;

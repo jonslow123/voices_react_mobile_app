@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, Linking, Platform, Alert } from 'react-native';
-import { Stack } from 'expo-router';
+import { View, StyleSheet, Linking, Platform, Alert, Text, TouchableOpacity } from 'react-native';
+import { Stack, usePathname } from 'expo-router';
 import AuthContextProvider from './context/auth';
-import PlayerProvider from './context/PlayerContext';
+import { PlayerContextProvider } from './context/PlayerContext';
 import { router, useRouter } from 'expo-router';
 import { ScrollProvider } from './context/ScrollContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -12,11 +12,15 @@ import {
   getTokenFromStorage 
 } from './utils/pushNotifications';
 import { testNotifications } from './utils/notificationTest';
+import BottomPlayerBar from '../components/BottomPlayerBar';
+import { Ionicons } from '@expo/vector-icons';
+import { BRAND_COLORS } from './styles/brandColors';
 
 export default function RootLayout() {
   const router = useRouter();
   const notificationListeners = useRef(null);
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState(null);
+  const pathname = usePathname();
   
   useEffect(() => {
     // Check if user has seen onboarding
@@ -32,13 +36,15 @@ export default function RootLayout() {
     
     checkOnboardingStatus();
     
-    // Rest of your existing effect code
-    console.log('Notification test result:', testNotifications);
-    const subscription = Linking.addEventListener('url', (event) => {
-      const url = event.url;
+    // Handle deep linking
+    const handleDeepLink = async (event) => {
+      const url = event?.url;
       console.log('Received URL:', url);
 
-      if (url?.includes('reset-password')) {
+      if (!url) return;
+
+      // Handle password reset
+      if (url.includes('reset-password')) {
         const token = url.split('reset-password/').pop();
         if (token) {
           router.replace({
@@ -47,7 +53,28 @@ export default function RootLayout() {
           });
         }
       }
-    });
+      
+      if (url.includes('verify-success')) {
+        router.replace('/login');
+      }
+      // Handle reset success (direct to login page)
+      if (url.includes('reset-success')) {
+        // You can optionally add a success message to show on the login page
+        await AsyncStorage.setItem('passwordResetSuccess', 'true');
+        router.replace('/login');
+      }
+    };
+    
+    // Check for initial URL when the app starts
+    Linking.getInitialURL().then(url => {
+      if (url) {
+        console.log("App opened with URL:", url);
+        handleDeepLink({ url });
+      }
+    }).catch(err => console.error('An error occurred getting initial URL', err));
+    
+    // Listen for deep links while the app is running
+    const subscription = Linking.addEventListener('url', handleDeepLink);
 
     async function registerDeviceWithServer(deviceToken, userToken) {
       try {
@@ -116,9 +143,48 @@ export default function RootLayout() {
     return null;
   }
   
+  const Header = () => {
+    return (
+      <View style={headerStyles.container}>
+        <View style={headerStyles.titleContainer}>
+          <Text style={headerStyles.title}>Voices Radio</Text>
+        </View>
+        
+        <TouchableOpacity
+          style={headerStyles.notificationButton}
+          onPress={() => router.push('/notifications')}
+        >
+          <Ionicons name="notifications-outline" size={24} color={BRAND_COLORS.primaryText} />
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  const headerStyles = StyleSheet.create({
+    container: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 15,
+      height: 50,
+    },
+    titleContainer: {
+      flex: 1,
+      alignItems: 'center',
+    },
+    title: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: BRAND_COLORS.primaryText,
+    },
+    notificationButton: {
+      padding: 8,
+    },
+  });
+
   return (
     <AuthContextProvider>
-      <PlayerProvider>
+      <PlayerContextProvider>
         <ScrollProvider>
           <Stack
             screenOptions={{
@@ -135,7 +201,7 @@ export default function RootLayout() {
             <Stack.Screen name="(tabs)" />
           </Stack>
         </ScrollProvider>
-      </PlayerProvider>
+      </PlayerContextProvider>
     </AuthContextProvider>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,10 +14,20 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import axios from 'axios';
 import Constants from 'expo-constants';
-import TopBanner from '../components/TopBanner';
 import { format, addDays, subDays } from 'date-fns';
 import { BRAND_COLORS } from './styles/brandColors';
 const { width, height } = Dimensions.get('window');
+
+function decodeHTMLEntities(text) {
+  if (!text) return '';
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&#39;/g, "'");
+}
 
 export default function ScheduleScreen() {
   const router = useRouter();
@@ -25,12 +35,44 @@ export default function ScheduleScreen() {
   const [scheduleData, setScheduleData] = useState({});
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [timezone, setTimezone] = useState('Europe/London');
+  const flatListRef = useRef(null);
+  const liveShowIndex = useRef(-1);
+  const hasScrolledToLive = useRef(false);
   
   const statusBarHeight = Constants.statusBarHeight || 0;
   
   useEffect(() => {
     fetchSchedule();
+    
+    // Reset the scroll flag when selected date changes
+    hasScrolledToLive.current = false;
   }, [selectedDate]);
+  
+  // Separate effect to attempt scrolling once data is loaded
+  useEffect(() => {
+    if (!loading && liveShowIndex.current !== -1 && !hasScrolledToLive.current) {
+      // We'll use a longer delay and multiple attempts to ensure FlatList is ready
+      const scrollToLiveShow = () => {
+        if (flatListRef.current) {
+          try {
+            flatListRef.current.scrollToIndex({
+              index: liveShowIndex.current,
+              animated: true,
+              viewPosition: 0.3 // Position item about 1/3 from the top
+            });
+            hasScrolledToLive.current = true;
+          } catch (error) {
+            console.log('Scroll error (will retry):', error);
+          }
+        }
+      };
+      
+      // Try multiple times with increasing delays to ensure FlatList is ready
+      setTimeout(scrollToLiveShow, 500);
+      setTimeout(scrollToLiveShow, 1000);
+      setTimeout(scrollToLiveShow, 2000);
+    }
+  }, [loading]);
   
   const fetchSchedule = async () => {
     try {
@@ -63,6 +105,9 @@ export default function ScheduleScreen() {
     // Group by day
     const processedData = {};
     
+    // Reset the live show index
+    liveShowIndex.current = -1;
+    
     // This is a simplified version - you might need to adjust based on the exact structure
     shows.forEach(show => {
       const showDate = new Date(show.starts);
@@ -72,19 +117,31 @@ export default function ScheduleScreen() {
         processedData[dateKey] = [];
       }
       
+      const isLive = new Date(show.starts) < new Date() && new Date(show.ends) > new Date();
+      
       processedData[dateKey].push({
         id: show.id,
-        name: show.name.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'),
+        name: decodeHTMLEntities(show.name),
         start_timestamp: show.start_timestamp,
         end_timestamp: show.end_timestamp,
         show_start_hour: format(new Date(show.starts), 'HH:mm'),
         show_end_hour: format(new Date(show.ends), 'HH:mm'),
         is_past: new Date(show.ends) < new Date(),
-        is_live: new Date(show.starts) < new Date() && new Date(show.ends) > new Date(),
+        is_live: isLive,
       });
     });
     
     setScheduleData(processedData);
+    
+    // Find the index of the live show in today's schedule
+    const selectedDateKey = format(selectedDate, 'yyyy-MM-dd');
+    const todayShows = processedData[selectedDateKey] || [];
+    
+    // Find the live show index
+    const liveIndex = todayShows.findIndex(show => show.is_live);
+    if (liveIndex !== -1) {
+      liveShowIndex.current = liveIndex;
+    }
   };
   
   const goToPreviousDay = () => {
@@ -106,7 +163,7 @@ export default function ScheduleScreen() {
         <Text style={styles.timeText}>{item.show_end_hour}</Text>
       </View>
       <View style={styles.showInfo}>
-        <Text style={styles.showName}>{item.name}</Text>
+        <Text style={styles.showName}>{decodeHTMLEntities(item.name)}</Text>
         {item.is_live && (
           <View style={styles.liveIndicator}>
             <Text style={styles.liveText}>LIVE</Text>
@@ -116,8 +173,51 @@ export default function ScheduleScreen() {
     </View>
   );
   
+  const handleScrollToIndexFailed = (info) => {
+    // Handle the error when scrollToIndex fails
+    console.log('Failed to scroll to index:', info);
+    
+    // Try a safer method - just scroll to offset with a best guess
+    if (flatListRef.current) {
+      const estimatedItemHeight = 88; // Adjust based on your item height
+      const offset = estimatedItemHeight * liveShowIndex.current;
+      
+      setTimeout(() => {
+        try {
+          flatListRef.current?.scrollToOffset({ 
+            offset: offset, 
+            animated: true 
+          });
+        } catch (e) {
+          console.log('Scroll to offset also failed:', e);
+        }
+      }, 500);
+    }
+  };
+  
   const selectedDateKey = format(selectedDate, 'yyyy-MM-dd');
   const showsForSelectedDate = scheduleData[selectedDateKey] || [];
+  
+  // Add a function to manually scroll to live show
+  const scrollToLiveShow = () => {
+    if (flatListRef.current && liveShowIndex.current !== -1) {
+      try {
+        flatListRef.current.scrollToIndex({
+          index: liveShowIndex.current,
+          animated: true,
+          viewPosition: 0.3
+        });
+      } catch (error) {
+        console.log('Manual scroll failed:', error);
+        // Fallback to offset scroll
+        const estimatedItemHeight = 88;
+        flatListRef.current.scrollToOffset({
+          offset: estimatedItemHeight * liveShowIndex.current,
+          animated: true
+        });
+      }
+    }
+  };
   
   return (
     <View style={styles.container}>
@@ -125,38 +225,36 @@ export default function ScheduleScreen() {
         backgroundColor: 'black',
         paddingTop: Platform.OS === 'ios' ? statusBarHeight : 0,
       }}>
-        <TopBanner />
       </SafeAreaView>
       
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <Ionicons name="arrow-back" size={24} color={BRAND_COLORS.primaryText} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Schedule</Text>
-        <View style={styles.placeholder} />
-      </View>
-      
-      <View style={styles.dateSelector}>
-        <TouchableOpacity 
-          style={styles.dateNavButton} 
-          onPress={goToPreviousDay}
-        >
-          <Ionicons name="chevron-back" size={24} color={BRAND_COLORS.accent} />
-        </TouchableOpacity>
-        
-        <Text style={styles.dateText}>
-          {format(selectedDate, 'EEEE dd/MM')}
-        </Text>
-        
-        <TouchableOpacity 
-          style={styles.dateNavButton} 
-          onPress={goToNextDay}
-        >
-          <Ionicons name="chevron-forward" size={24} color={BRAND_COLORS.accent} />
-        </TouchableOpacity>
+      <View style={styles.headerContainer}>
+        <View style={styles.headerRow}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+          >
+            <Ionicons name="arrow-back" size={24} color={BRAND_COLORS.primaryText} />
+          </TouchableOpacity>
+          <Text style={styles.title}>Schedule</Text>
+          <View style={{ width: 24 }} /> {/* Placeholder for symmetry */}
+        </View>
+        <View style={styles.dateSelector}>
+          <TouchableOpacity 
+            style={styles.dateNavButton} 
+            onPress={goToPreviousDay}
+          >
+            <Ionicons name="chevron-back" size={24} color={BRAND_COLORS.accent} />
+          </TouchableOpacity>
+          <Text style={styles.dateText}>
+            {format(selectedDate, 'EEEE dd/MM')}
+          </Text>
+          <TouchableOpacity 
+            style={styles.dateNavButton} 
+            onPress={goToNextDay}
+          >
+            <Ionicons name="chevron-forward" size={24} color={BRAND_COLORS.accent} />
+          </TouchableOpacity>
+        </View>
       </View>
       
       {loading ? (
@@ -171,10 +269,16 @@ export default function ScheduleScreen() {
         </View>
       ) : (
         <FlatList
+          ref={flatListRef}
           data={showsForSelectedDate}
           renderItem={renderShow}
           keyExtractor={item => item.id.toString()}
           contentContainerStyle={styles.listContent}
+          onScrollToIndexFailed={handleScrollToIndexFailed}
+          initialNumToRender={20} // Render more items initially
+          maxToRenderPerBatch={20} // Increase batch size
+          windowSize={10} // Increase window size
+          removeClippedSubviews={false} // Keep components mounted
         />
       )}
     </View>
@@ -186,13 +290,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: BRAND_COLORS.background,
   },
-  header: {
+  headerContainer: {
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: BRAND_COLORS.divider,
+    justifyContent: 'center',
+    width: '100%',
+    marginBottom: 4,
   },
   backButton: {
     padding: 4,
@@ -200,12 +307,17 @@ const styles = StyleSheet.create({
   title: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 18,
+    fontSize: 24,
     fontWeight: 'bold',
-    color: BRAND_COLORS.accent,
+    color: BRAND_COLORS.primaryText,
   },
-  placeholder: {
-    width: 32,
+  liveShowButton: {
+    padding: 8,
+    backgroundColor: 'rgba(255, 0, 0, 0.1)',
+    borderRadius: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   dateSelector: {
     flexDirection: 'row',

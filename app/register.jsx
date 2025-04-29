@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   View, 
   TextInput, 
@@ -11,7 +11,8 @@ import {
   Platform,
   Image,
   Alert,
-  ScrollView
+  ScrollView,
+  Modal
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +24,31 @@ const { width, height } = Dimensions.get('window');
 const API_URL = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/auth`;
 console.log(API_URL);
 
+// List of common countries - this can be expanded
+const COUNTRIES = [
+  'Australia', 'Brazil', 'Canada', 'China', 'France', 'Germany', 
+  'India', 'Italy', 'Japan', 'Mexico', 'Netherlands', 'New Zealand', 
+  'Russia', 'South Africa', 'Spain', 'Sweden', 'Switzerland', 'United Kingdom', 
+  'United States', 'Other'
+];
+
+// Add checkbox component - using a custom checkbox for simplicity
+const CheckboxItem = ({ label, value, onToggle }) => {
+  return (
+    <TouchableOpacity 
+      style={styles.checkboxContainer} 
+      onPress={onToggle}
+    >
+      <View style={[
+        styles.checkbox, 
+        value && { backgroundColor: BRAND_COLORS.accent, borderColor: BRAND_COLORS.accent }
+      ]}>
+        {value && <Ionicons name="checkmark" size={16} color="#fff" />}
+      </View>
+      <Text style={styles.checkboxLabel}>{label}</Text>
+    </TouchableOpacity>
+  );
+};
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState('');
@@ -35,7 +61,66 @@ export default function RegisterScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Dropdown states
+  const [showCountryModal, setShowCountryModal] = useState(false);
+  const [showCityModal, setShowCityModal] = useState(false);
+  const [filteredCities, setFilteredCities] = useState([]);
+  const [citySearch, setCitySearch] = useState('');
+  
   const router = useRouter();
+
+  // In your component, add state for notification preferences
+  const [notificationPrefs, setNotificationPrefs] = useState({
+    newShows: true,
+    artistUpdates: true,
+    appUpdates: true,
+    newsletters: true,
+    eventUpdates: true,
+  });
+
+  // Toggle function
+  const toggleNotificationPref = (key) => {
+    setNotificationPrefs(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  // Get cities based on selected country
+  useEffect(() => {
+    if (country) {
+      fetchCitiesForCountry(country);
+    }
+  }, [country]);
+
+  // Fetch cities for selected country (simplified for demo)
+  const fetchCitiesForCountry = async (selectedCountry) => {
+    // For demo, this is a simplified approach
+    // In production, you might call an API for this
+    if (selectedCountry === 'United Kingdom') {
+      setFilteredCities(['London', 'Manchester', 'Birmingham', 'Glasgow', 'Liverpool', 'Edinburgh', 'Bristol', 'Leeds', 'Sheffield', 'Cardiff']);
+    } else if (selectedCountry === 'United States') {
+      setFilteredCities(['New York', 'Los Angeles', 'Chicago', 'Houston', 'Phoenix', 'Philadelphia', 'San Antonio', 'San Diego', 'Dallas', 'San Jose']);
+    } else {
+      // For other countries, reset city
+      setFilteredCities([]);
+      setCity('');
+    }
+  };
+
+  // Filter cities based on search
+  useEffect(() => {
+    if (citySearch && filteredCities.length > 0) {
+      const lowerCaseSearch = citySearch.toLowerCase();
+      const filtered = filteredCities.filter(city => 
+        city.toLowerCase().includes(lowerCaseSearch)
+      );
+      setFilteredCities(filtered);
+    } else if (country) {
+      fetchCitiesForCountry(country);
+    }
+  }, [citySearch]);
 
   const validateEmail = (email) => {
     const re = /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
@@ -82,15 +167,14 @@ export default function RegisterScreen() {
           country: country || '',
         },
         emailPreferences: {
-          newsletters: true,
-          eventUpdates: true,
-          artistAlerts: true,
-          marketingEmails: false
+          newsletters: notificationPrefs.newsletters,
+          eventUpdates: notificationPrefs.eventUpdates,
+          artistAlerts: notificationPrefs.artistUpdates,
         },
         notificationPreferences: {
-          newShows: true,
-          artistUpdates: true,
-          appUpdates: true
+          newShows: notificationPrefs.newShows,
+          artistUpdates: notificationPrefs.artistUpdates,
+          appUpdates: notificationPrefs.appUpdates
         }
       });
 
@@ -132,171 +216,399 @@ export default function RegisterScreen() {
     }
   };
 
+  // Render country dropdown modal
+  const renderCountryModal = () => (
+    <Modal
+      visible={showCountryModal}
+      transparent={true}
+      animationType="slide"
+      onRequestClose={() => setShowCountryModal(false)}
+    >
+      <TouchableWithoutFeedback onPress={() => setShowCountryModal(false)}>
+        <View style={styles.modalOverlay}>
+          <TouchableWithoutFeedback onPress={e => e.stopPropagation()}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Country</Text>
+                <TouchableOpacity onPress={() => setShowCountryModal(false)}>
+                  <Ionicons name="close" size={24} color="black" />
+                </TouchableOpacity>
+              </View>
+              
+              <ScrollView style={styles.modalScrollView}>
+                {COUNTRIES.map((item, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={styles.modalItem}
+                    onPress={() => {
+                      setCountry(item);
+                      setShowCountryModal(false);
+                      // Reset city if country changes
+                      if (item !== country) {
+                        setCity('');
+                      }
+                    }}
+                  >
+                    <Text style={[
+                      styles.modalItemText,
+                      item === country && styles.selectedItemText
+                    ]}>
+                      {item}
+                    </Text>
+                    {item === country && (
+                      <Ionicons name="checkmark" size={20} color={BRAND_COLORS.accent} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </TouchableWithoutFeedback>
+        </View>
+      </TouchableWithoutFeedback>
+    </Modal>
+  );
+
+  // Render city dropdown modal
+  const renderCityModal = () => (
+    <Modal
+      visible={showCityModal}
+      transparent={true}
+      animationType="slide"
+      onRequestClose={() => setShowCityModal(false)}
+    >
+      <TouchableWithoutFeedback onPress={() => setShowCityModal(false)}>
+        <View style={styles.modalOverlay}>
+          <TouchableWithoutFeedback onPress={e => e.stopPropagation()}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>City</Text>
+                <TouchableOpacity onPress={() => setShowCityModal(false)}>
+                  <Ionicons name="close" size={24} color="black" />
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.searchContainer}>
+                <Ionicons name="search" size={20} color="gray" style={styles.searchIcon} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search cities..."
+                  value={citySearch}
+                  onChangeText={setCitySearch}
+                  placeholderTextColor="#999"
+                />
+                {citySearch !== '' && (
+                  <TouchableOpacity onPress={() => setCitySearch('')}>
+                    <Ionicons name="close-circle" size={20} color="gray" />
+                  </TouchableOpacity>
+                )}
+              </View>
+              
+              <ScrollView style={styles.modalScrollView}>
+                {filteredCities.length > 0 ? (
+                  filteredCities.map((item, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={styles.modalItem}
+                      onPress={() => {
+                        setCity(item);
+                        setShowCityModal(false);
+                      }}
+                    >
+                      <Text style={[
+                        styles.modalItemText,
+                        item === city && styles.selectedItemText
+                      ]}>
+                        {item}
+                      </Text>
+                      {item === city && (
+                        <Ionicons name="checkmark" size={20} color={BRAND_COLORS.accent} />
+                      )}
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <View style={styles.noResultsContainer}>
+                    <Text style={styles.noResultsText}>
+                      {country ? 'No cities found' : 'Please select a country first'}
+                    </Text>
+                    {country && (
+                      <TouchableOpacity
+                        style={styles.addCustomButton}
+                        onPress={() => {
+                          if (citySearch) {
+                            setCity(citySearch);
+                            setShowCityModal(false);
+                          }
+                        }}
+                      >
+                        <Text style={styles.addCustomButtonText}>
+                          {citySearch ? `Use "${citySearch}"` : 'Type a city name'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+              </ScrollView>
+            </View>
+          </TouchableWithoutFeedback>
+        </View>
+      </TouchableWithoutFeedback>
+    </Modal>
+  );
+
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+    <TouchableWithoutFeedback onPress={() => {
+      // Only dismiss keyboard, don't interfere with other touch events
+      Keyboard.dismiss();
+    }} accessible={false}>
       <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <View style={styles.logoContainer}>
-            <Image
-              source={require('../assets/logo.png')}
-              style={styles.logo}
-              resizeMode="contain"
-            />
-          </View>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.push('/')}
+        >
+          <Ionicons name="arrow-back" size={28} color={BRAND_COLORS.accent} />
+        </TouchableOpacity>
 
-          <View style={styles.formContainer}>
-            <Text style={styles.title}>Create Account</Text>
-            
-            {/* Personal Information */}
-            <Text style={styles.sectionTitle}>Personal Information</Text>
-            
-            <View style={styles.row}>
-              <View style={[styles.inputWrapper, styles.halfWidth]}>
-                <Text style={styles.label}>First Name *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={firstName}
-                  onChangeText={setFirstName}
-                  placeholder="First Name"
-                  placeholderTextColor="#999"
-                  autoCapitalize="words"
+        <ScrollView 
+          contentContainerStyle={{ 
+            flexGrow: 1,
+            paddingTop: 20
+          }}
+          keyboardShouldPersistTaps="handled"
+          scrollEventThrottle={16}
+          alwaysBounceVertical={true}
+          showsVerticalScrollIndicator={true}
+          directionalLockEnabled={true}
+          scrollEnabled={true}
+        >
+          <TouchableWithoutFeedback>
+            <View style={{ width: '100%' }}>
+              <View style={styles.logoContainer}>
+                <Image
+                  source={require('../assets/logo.png')}
+                  style={styles.logo}
+                  resizeMode="contain"
                 />
               </View>
 
-              <View style={[styles.inputWrapper, styles.halfWidth]}>
-                <Text style={styles.label}>Last Name *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={lastName}
-                  onChangeText={setLastName}
-                  placeholder="Last Name"
-                  placeholderTextColor="#999"
-                  autoCapitalize="words"
-                />
-              </View>
-            </View>
+              <View style={styles.formContainer}>
+                <Text style={styles.title}>Create Account</Text>
+                
+                {/* Personal Information */}
+                <Text style={[styles.sectionTitle, styles.touchableText]}>Personal Information</Text>
+                
+                <View style={styles.row}>
+                  <View style={[styles.inputWrapper, styles.halfWidth]}>
+                    <Text style={styles.label}>First Name *</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={firstName}
+                      onChangeText={setFirstName}
+                      placeholder="First Name"
+                      placeholderTextColor="#999"
+                      autoCapitalize="words"
+                    />
+                  </View>
 
-            <View style={styles.inputWrapper}>
-              <Text style={styles.label}>Email *</Text>
-              <TextInput
-                style={styles.input}
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                placeholder="your.email@example.com"
-                placeholderTextColor="#999"
-                keyboardType="email-address"
-                autoComplete="email"
-              />
-            </View>
+                  <View style={[styles.inputWrapper, styles.halfWidth]}>
+                    <Text style={styles.label}>Last Name *</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={lastName}
+                      onChangeText={setLastName}
+                      placeholder="Last Name"
+                      placeholderTextColor="#999"
+                      autoCapitalize="words"
+                    />
+                  </View>
+                </View>
 
-            {/* Location Information */}
-            <Text style={styles.sectionTitle}>Location (Optional)</Text>
-            
-            <View style={styles.row}>
-              <View style={[styles.inputWrapper, styles.halfWidth]}>
-                <Text style={styles.label}>City</Text>
-                <TextInput
-                  style={styles.input}
-                  value={city}
-                  onChangeText={setCity}
-                  placeholder="City"
-                  placeholderTextColor="#999"
-                />
-              </View>
-
-              <View style={[styles.inputWrapper, styles.halfWidth]}>
-                <Text style={styles.label}>Country</Text>
-                <TextInput
-                  style={styles.input}
-                  value={country}
-                  onChangeText={setCountry}
-                  placeholder="Country"
-                  placeholderTextColor="#999"
-                />
-              </View>
-            </View>
-
-            {/* Password Section */}
-            <Text style={styles.sectionTitle}>Set Password</Text>
-            
-            <View style={styles.inputWrapper}>
-              <Text style={styles.label}>Password *</Text>
-              <View style={styles.passwordContainer}>
-                <TextInput
-                  style={styles.passwordInput}
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry={!showPassword}
-                  placeholder="Create a password"
-                  placeholderTextColor="#999"
-                />
-                <TouchableOpacity 
-                  onPress={() => setShowPassword(!showPassword)}
-                  style={styles.eyeIcon}
-                >
-                  <Ionicons 
-                    name={showPassword ? "eye-off" : "eye"} 
-                    size={24} 
-                    color="gray"
+                <View style={styles.inputWrapper}>
+                  <Text style={styles.label}>Email *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={email}
+                    onChangeText={setEmail}
+                    placeholder="your.email@example.com"
+                    placeholderTextColor="#999"
+                    keyboardType="email-address"
+                    autoComplete="email"
+                    textContentType="username"
                   />
-                </TouchableOpacity>
-              </View>
-            </View>
+                </View>
 
-            <View style={styles.inputWrapper}>
-              <Text style={styles.label}>Confirm Password *</Text>
-              <View style={styles.passwordContainer}>
-                <TextInput
-                  style={styles.passwordInput}
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  secureTextEntry={!showConfirmPassword}
-                  placeholder="Confirm your password"
-                  placeholderTextColor="#999"
-                />
+                {/* Location Information */}
+                <Text style={styles.sectionTitle}>Location</Text>
+                
+                <View style={styles.row}>
+                  <View style={[styles.inputWrapper, styles.halfWidth]}>
+                    <Text style={styles.label}>Country</Text>
+                    <TouchableOpacity 
+                      style={styles.dropdownButton}
+                      onPress={() => setShowCountryModal(true)}
+                    >
+                      <Text style={country ? styles.dropdownSelectedText : styles.dropdownPlaceholder}>
+                        {country || "Country"}
+                      </Text>
+                      <Ionicons name="chevron-down" size={20} color="gray" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={[styles.inputWrapper, styles.halfWidth]}>
+                    <Text style={styles.label}>City</Text>
+                    <TouchableOpacity 
+                      style={[
+                        styles.dropdownButton,
+                        !country && styles.dropdownDisabled
+                      ]}
+                      onPress={() => {
+                        if (country) {
+                          setShowCityModal(true);
+                        } else {
+                          Alert.alert('Select Country', 'Please select a country first');
+                        }
+                      }}
+                    >
+                      <Text style={city ? styles.dropdownSelectedText : styles.dropdownPlaceholder}>
+                        {city || "City"}
+                      </Text>
+                      <Ionicons name="chevron-down" size={20} color="gray" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Password Section */}
+                <Text style={styles.sectionTitle}>Set Password</Text>
+                
+                <View style={styles.inputWrapper}>
+                  <Text style={styles.label}>Password *</Text>
+                  <View style={styles.passwordContainer}>
+                    <TextInput
+                      style={styles.passwordInput}
+                      value={password}
+                      onChangeText={setPassword}
+                      secureTextEntry={!showPassword}
+                      placeholder="Create a password"
+                      placeholderTextColor="#999"
+                      autoComplete="new-password"
+                      textContentType="newPassword"
+                      passwordRules="minlength: 8;"
+                    />
+                    <TouchableOpacity 
+                      onPress={() => setShowPassword(!showPassword)}
+                      style={styles.eyeIcon}
+                    >
+                      <Ionicons 
+                        name={showPassword ? "eye-off" : "eye"} 
+                        size={24} 
+                        color="gray"
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.inputWrapper}>
+                  <Text style={styles.label}>Confirm Password *</Text>
+                  <View style={styles.passwordContainer}>
+                    <TextInput
+                      style={styles.passwordInput}
+                      value={confirmPassword}
+                      onChangeText={setConfirmPassword}
+                      secureTextEntry={!showConfirmPassword}
+                      placeholder="Confirm password"
+                      placeholderTextColor="#999"
+                      autoComplete="new-password"
+                      textContentType="newPassword"
+                      passwordRules="minlength: 8;"
+                    />
+                    <TouchableOpacity 
+                      onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                      style={styles.eyeIcon}
+                    >
+                      <Ionicons 
+                        name={showConfirmPassword ? "eye-off" : "eye"} 
+                        size={24} 
+                        color="gray"
+                      />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.helperText}>Password must be at least 8 characters</Text>
+                </View>
+
+                {/* Notification Preferences */}
+                <View style={styles.notificationSection}>
+                  <Text style={styles.sectionTitle}>Notification Preferences</Text>
+                  <Text style={styles.notificationDescription}>
+                    Let us know how you'd like to stay updated:
+                  </Text>
+                  
+                  <View style={styles.notificationGroup}>
+                    <Text style={styles.notificationGroupTitle}>App Notifications</Text>
+                    <CheckboxItem 
+                      label="New Shows" 
+                      value={notificationPrefs.newShows}
+                      onToggle={() => toggleNotificationPref('newShows')}
+                    />
+                    <CheckboxItem 
+                      label="Artist Updates" 
+                      value={notificationPrefs.artistUpdates}
+                      onToggle={() => toggleNotificationPref('artistUpdates')}
+                    />
+                    <CheckboxItem 
+                      label="App Updates" 
+                      value={notificationPrefs.appUpdates}
+                      onToggle={() => toggleNotificationPref('appUpdates')}
+                    />
+                  </View>
+                  
+                  <View style={styles.notificationGroup}>
+                    <Text style={styles.notificationGroupTitle}>Email Notifications</Text>
+                    <CheckboxItem 
+                      label="Newsletters" 
+                      value={notificationPrefs.newsletters}
+                      onToggle={() => toggleNotificationPref('newsletters')}
+                    />
+                    <CheckboxItem 
+                      label="Event Updates" 
+                      value={notificationPrefs.eventUpdates}
+                      onToggle={() => toggleNotificationPref('eventUpdates')}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.termsContainer}>
+                  <Text style={styles.termsText}>
+                    If selected above, you agree to receive newsletter and event updates.
+                    You can customize your preferences in settings after registration.
+                  </Text>
+                </View>
+
                 <TouchableOpacity 
-                  onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                  style={styles.eyeIcon}
+                  style={[styles.button, isLoading && styles.buttonDisabled]}
+                  onPress={handleRegister}
+                  disabled={isLoading}
                 >
-                  <Ionicons 
-                    name={showConfirmPassword ? "eye-off" : "eye"} 
-                    size={24} 
-                    color="gray"
-                  />
+                  <Text style={styles.buttonText}>
+                    {isLoading ? 'Creating Account...' : 'Create Account'}
+                  </Text>
                 </TouchableOpacity>
+                
+                <View style={styles.loginLinkContainer}>
+                  <Text style={styles.loginText}>Already have an account? </Text>
+                  <TouchableOpacity onPress={() => router.replace('/login')}>
+                    <Text style={styles.loginLink}>Log In</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-              <Text style={styles.helperText}>Password must be at least 6 characters</Text>
             </View>
-
-            <View style={styles.termsContainer}>
-              <Text style={styles.termsText}>
-                By creating an account, you agree to receive newsletter and artist updates.
-                You can customize your preferences in settings after registration.
-              </Text>
-            </View>
-
-            <TouchableOpacity 
-              style={[styles.button, isLoading && styles.buttonDisabled]}
-              onPress={handleRegister}
-              disabled={isLoading}
-            >
-              <Text style={styles.buttonText}>
-                {isLoading ? 'Creating Account...' : 'Create Account'}
-              </Text>
-            </TouchableOpacity>
-            
-            <View style={styles.loginLinkContainer}>
-              <Text style={styles.loginText}>Already have an account? </Text>
-              <TouchableOpacity onPress={() => router.replace('/login')}>
-                <Text style={styles.loginLink}>Log In</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          </TouchableWithoutFeedback>
         </ScrollView>
+        
+        {/* Render modals */}
+        {renderCountryModal()}
+        {renderCityModal()}
       </KeyboardAvoidingView>
     </TouchableWithoutFeedback>
   );
@@ -314,9 +626,12 @@ const styles = StyleSheet.create({
     paddingVertical: 30,
   },
   logoContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 20,
-    paddingTop: Platform.OS === 'ios' ? 30 : 10,
+    marginTop: 80, // Increased to move content down
+    paddingHorizontal: 20, // Add padding to account for the back button
   },
   logo: {
     width: 200,
@@ -328,6 +643,7 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     alignSelf: 'center',
     padding: 20,
+    pointerEvents: 'box-none',
   },
   title: {
     fontSize: 24,
@@ -341,7 +657,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginTop: 15,
     marginBottom: 10,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
   },
   row: {
     flexDirection: 'row',
@@ -352,12 +668,14 @@ const styles = StyleSheet.create({
   },
   inputWrapper: {
     marginBottom: 16,
+    backgroundColor: 'transparent',
   },
   label: {
     fontSize: 16,
     marginBottom: 8,
     color: BRAND_COLORS.primaryText,
     fontWeight: '500',
+    pointerEvents: 'box-none',
   },
   input: {
     height: 50,
@@ -397,7 +715,7 @@ const styles = StyleSheet.create({
   },
   termsText: {
     fontSize: 14,
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
     lineHeight: 20,
   },
   button: {
@@ -423,10 +741,166 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   loginText: {
-    color: BRAND_COLORS.black,
+    color: BRAND_COLORS.primaryText,
   },
   loginLink: {
     color: BRAND_COLORS.accent,
     fontWeight: '500',
   },
+  dropdownButton: {
+    height: 50,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    paddingHorizontal: 15,
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  dropdownDisabled: {
+    backgroundColor: '#f5f5f5',
+    borderColor: '#eee',
+  },
+  dropdownPlaceholder: {
+    color: '#999',
+    fontSize: 16,
+  },
+  dropdownSelectedText: {
+    color: BRAND_COLORS.black,
+    fontSize: 16,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingBottom: 30,
+    maxHeight: height * 0.7,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: BRAND_COLORS.black,
+  },
+  modalScrollView: {
+    maxHeight: height * 0.5,
+  },
+  modalItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  modalItemText: {
+    fontSize: 16,
+    color: BRAND_COLORS.black,
+  },
+  selectedItemText: {
+    color: BRAND_COLORS.accent,
+    fontWeight: '500',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    margin: 16,
+    marginTop: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#eee',
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    height: 40,
+    color: BRAND_COLORS.black,
+    fontSize: 16,
+  },
+  noResultsContainer: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  noResultsText: {
+    color: 'gray',
+    fontSize: 16,
+    marginBottom: 12,
+  },
+  addCustomButton: {
+    backgroundColor: BRAND_COLORS.accent,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  addCustomButtonText: {
+    color: 'white',
+    fontWeight: '500',
+  },
+  notificationSection: {
+    marginVertical: 15,
+  },
+  notificationDescription: {
+    fontSize: 14,
+    color: BRAND_COLORS.secondaryText || '#666',
+    marginBottom: 10,
+  },
+  notificationGroup: {
+    marginBottom: 15,
+  },
+  notificationGroupTitle: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: BRAND_COLORS.primaryText,
+    marginBottom: 8,
+  },
+  checkboxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#ccc',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  checkboxLabel: {
+    fontSize: 15,
+    color: BRAND_COLORS.primaryText,
+  },
+  backButton: {
+    position: 'absolute',
+    top: 80, // Match the logoContainer marginTop
+    left: 20,
+    zIndex: 10,
+    height: 40,
+    width: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  touchableText: {
+    backgroundColor: 'transparent'
+  }
 }); 

@@ -143,7 +143,7 @@ export function AuthProvider({ children }) {
       
       return true;
     } catch (error) {
-      console.error('Token refresh failed:', error);
+      console.error('HERE: Token refresh failed:', error);
       // Force logout on refresh failure
       logout();
       return false;
