@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { storeSecurely, getSecurely, removeSecurely } from '../utils/secureStorage';
 import secureApi from '../utils/api';
 import { jwtDecode } from 'jwt-decode';
+import axios from 'axios';
 
 // Create context
 const AuthContext = createContext(null);
@@ -13,6 +14,9 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const refreshTimeoutRef = useRef(null);
+
+  // Add an authentication state
+  const isAuthenticated = !!token;
 
   // Load token on startup
   useEffect(() => {
@@ -158,12 +162,43 @@ export function AuthProvider({ children }) {
         email: credentials.email,
         password: credentials.password
       };
-      console.log(loginData);
+      
+      console.log('Attempting login with credentials:', {
+        email: loginData.email,
+        passwordLength: loginData.password ? loginData.password.length : 0
+      });
 
-      const response = await secureApi.post('/api/auth/login', loginData);
+      // Try the direct axios approach as a fallback if the secureApi fails
+      let response;
+      try {
+        // Use the secureApi instance first
+        response = await secureApi.post('/api/auth/login', loginData);
+      } catch (err) {
+        console.log('First login attempt failed, trying direct axios...', err.message);
+        
+        // If that fails, try a direct axios call
+        const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+        if (!API_URL) {
+          throw new Error('Backend URL not configured in environment variables');
+        }
+        
+        response = await axios.post(`${API_URL}/api/auth/login`, loginData, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          timeout: 15000 // Longer timeout
+        });
+      }
       
       // Process login response
       const { token, user } = response.data;
+      
+      if (!token || !user) {
+        throw new Error('Invalid response from server - missing token or user data');
+      }
+      
+      console.log('Login successful, token received');
       
       // Store token and user data
       await storeSecurely('userToken', token);
@@ -172,10 +207,30 @@ export function AuthProvider({ children }) {
       setToken(token);
       setUser(user);
       
+      // Set up token refresh
+      setupTokenRefresh(token);
+      
       return true;
     } catch (error) {
-      console.error('Login error:', error);
-      return false;
+      console.error('Login error:', error.message, error.stack);
+      
+      // More detailed logging for network errors
+      if (error.response) {
+        // Server responded with an error status
+        console.log('Server error response:', {
+          status: error.response.status,
+          data: error.response.data,
+          headers: error.response.headers,
+        });
+      } else if (error.request) {
+        // Request was made but no response
+        console.log('No response received:', error.request);
+      } else {
+        // Error in setting up the request
+        console.log('Request setup error:', error.message);
+      }
+      
+      throw error; // Rethrow to let the calling code handle it
     }
   };
 
@@ -203,16 +258,43 @@ export function AuthProvider({ children }) {
     }
   };
 
+  // Add this function for debugging
+  const checkAuthentication = async () => {
+    console.log('Checking authentication status...');
+    try {
+      const storedToken = await getSecurely('userToken');
+      console.log('Stored token exists:', !!storedToken);
+      
+      if (storedToken) {
+        const isValid = isTokenValid(storedToken);
+        console.log('Is token valid:', isValid);
+        
+        if (isValid && !isAuthenticated) {
+          console.log('Token is valid but not set in state, updating...');
+          const userData = await getSecurely('userData');
+          setToken(storedToken);
+          setUser(userData);
+          return true;
+        }
+      }
+      return !!storedToken && isTokenValid(storedToken);
+    } catch (error) {
+      console.error('Error in checkAuthentication:', error);
+      return false;
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
         token,
         user,
-        isLoggedIn: !!token,
+        loading,
         login,
         logout,
+        isAuthenticated,
         refreshToken,
-        loading
+        checkAuthentication,
       }}
     >
       {children}

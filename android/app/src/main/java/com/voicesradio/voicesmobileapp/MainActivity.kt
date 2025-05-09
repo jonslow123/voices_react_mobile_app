@@ -1,4 +1,4 @@
-package com.voicesradio.app
+package com.voicesradio.voicesmobileapp
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

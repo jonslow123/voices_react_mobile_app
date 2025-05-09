@@ -19,7 +19,19 @@ import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import { BRAND_COLORS } from './styles/brandColors'; 
 import { Dimensions } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
+import * as AuthSession from 'expo-auth-session';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import Constants from 'expo-constants';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+import auth from '@react-native-firebase/auth';
+import { 
+  isBiometricAvailable, 
+  setBiometricAuthEnabled 
+} from './utils/biometricAuth';
+import * as SecureStore from 'expo-secure-store';
 const { width, height } = Dimensions.get('window');
+
 
 const API_URL = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/auth`;
 console.log(API_URL);
@@ -50,6 +62,9 @@ const CheckboxItem = ({ label, value, onToggle }) => {
   );
 };
 
+// Function to determine if app is running in Expo Go
+const isExpoGo = Constants.appOwnership === 'expo';
+
 export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -72,11 +87,9 @@ export default function RegisterScreen() {
 
   // In your component, add state for notification preferences
   const [notificationPrefs, setNotificationPrefs] = useState({
-    newShows: true,
-    artistUpdates: true,
-    appUpdates: true,
-    newsletters: true,
-    eventUpdates: true,
+    artistAlerts: true,
+    eventAlerts: true,
+    newsletters: true
   });
 
   // Toggle function
@@ -166,19 +179,20 @@ export default function RegisterScreen() {
           city: city || '',
           country: country || '',
         },
-        emailPreferences: {
-          newsletters: notificationPrefs.newsletters,
-          eventUpdates: notificationPrefs.eventUpdates,
-          artistAlerts: notificationPrefs.artistUpdates,
-        },
+        newsletters: notificationPrefs.newsletters,
         notificationPreferences: {
-          newShows: notificationPrefs.newShows,
-          artistUpdates: notificationPrefs.artistUpdates,
-          appUpdates: notificationPrefs.appUpdates
+          artistAlerts: notificationPrefs.artistAlerts,
+          eventAlerts: notificationPrefs.eventAlerts
         }
       });
 
-      // Clear the input fields before showing alert
+      // Check if biometric authentication is available
+      const biometricStatus = await isBiometricAvailable();
+      
+      // Clear the input fields
+      const savedEmail = email;
+      const savedPassword = password;
+      
       setEmail('');
       setPassword('');
       setConfirmPassword('');
@@ -186,17 +200,54 @@ export default function RegisterScreen() {
       setLastName('');
       setCity('');
       setCountry('');
-
-      Alert.alert(
-        'Account Created',
-        'Check your email for a verification link to activate your account.',
-        [
-          { 
-            text: 'OK', 
-            onPress: () => router.push('/login')
-          }
-        ]
-      );
+      
+      if (biometricStatus.available) {
+        // Ask if they want to enable biometric login
+        Alert.alert(
+          `Enable ${biometricStatus.biometryType} Login`,
+          `Would you like to use ${biometricStatus.biometryType} for faster login next time?`,
+          [
+            {
+              text: 'Not Now',
+              style: 'cancel',
+              onPress: () => {
+                // Store preference to not ask again
+                setBiometricAuthEnabled(false);
+                
+                // Show verification email alert and navigate to login
+                Alert.alert(
+                  'Account Created',
+                  'Check your email for a verification link to activate your account.',
+                  [{ text: 'OK', onPress: () => router.push('/login') }]
+                );
+              }
+            },
+            {
+              text: 'Enable',
+              onPress: async () => {
+                // Save credentials securely
+                await SecureStore.setItemAsync('userEmail', savedEmail);
+                await SecureStore.setItemAsync('userPassword', savedPassword);
+                await setBiometricAuthEnabled(true);
+                
+                // Show verification email alert and navigate to login
+                Alert.alert(
+                  'Account Created',
+                  'Check your email for a verification link to activate your account.',
+                  [{ text: 'OK', onPress: () => router.push('/login') }]
+                );
+              }
+            }
+          ]
+        );
+      } else {
+        // No biometrics available, just show the regular alert
+        Alert.alert(
+          'Account Created',
+          'Check your email for a verification link to activate your account.',
+          [{ text: 'OK', onPress: () => router.push('/login') }]
+        );
+      }
     } catch (error) {
       let errorMessage = 'Registration failed';
       
@@ -355,6 +406,116 @@ export default function RegisterScreen() {
     </Modal>
   );
 
+  // Add states for social authentication
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isAppleLoading, setIsAppleLoading] = useState(false);
+  const [appleAuthAvailable, setAppleAuthAvailable] = useState(false);
+  
+  // Google Authentication configuration
+  const discovery = {
+    authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenEndpoint: 'https://oauth2.googleapis.com/token',
+    revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
+  };
+  
+  // Check if Apple Authentication is available on the device
+  useEffect(() => {
+    const checkAppleAuthAvailability = async () => {
+      const isAvailable = await AppleAuthentication.isAvailableAsync();
+      setAppleAuthAvailable(isAvailable);
+    };
+    
+    checkAppleAuthAvailability();
+  }, []);
+
+  // Configure Google Auth Request
+  const [request, response, promptAsync] = AuthSession.useAuthRequest(
+    {
+      clientId: Platform.OS === 'ios' 
+        ? 'YOUR_IOS_CLIENT_ID.apps.googleusercontent.com'
+        : 'YOUR_ANDROID_CLIENT_ID.apps.googleusercontent.com',
+      scopes: ['profile', 'email'],
+      redirectUri: isExpoGo 
+        ? AuthSession.makeRedirectUri({useProxy: true}) 
+        : AuthSession.makeRedirectUri({native: 'voicesradio://'}),
+      usePKCE: true,
+      responseType: "code"
+    },
+    discovery
+  );
+
+  // In useEffect or app initialization
+  useEffect(() => {
+    // Initialize Google Sign-In for native apps
+    if (!isExpoGo) {
+      GoogleSignin.configure({
+        webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+        offlineAccess: true,
+        iosClientId: '10790134127-c30c7cna9g83h8e02u1lnl26epdtaknj.apps.googleusercontent.com',
+      });
+    }
+  }, []);
+
+  // Google Sign-In handler
+  const handleGoogleSignIn = async () => {
+    try {
+      setIsGoogleLoading(true);
+      
+      await GoogleSignin.hasPlayServices();
+      const userInfo = await GoogleSignin.signIn();
+      
+      // Set form fields from user info
+      if (userInfo.user.email) setEmail(userInfo.user.email);
+      if (userInfo.user.givenName) setFirstName(userInfo.user.givenName);
+      if (userInfo.user.familyName) setLastName(userInfo.user.familyName);
+      
+      Alert.alert(
+        "Google Sign-In Successful",
+        "Please complete your registration with any additional information.",
+        [{ text: "OK" }]
+      );
+    } catch (error) {
+      console.error("Google sign in error:", error);
+      Alert.alert("Error", "Failed to sign in with Google. Please try again.");
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
+
+  // Handle Apple Sign In
+  const handleAppleSignIn = async () => {
+    try {
+      setIsAppleLoading(true);
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      
+      // Use the credential
+      if (credential.email) setEmail(credential.email);
+      if (credential.fullName) {
+        if (credential.fullName.givenName) setFirstName(credential.fullName.givenName);
+        if (credential.fullName.familyName) setLastName(credential.fullName.familyName);
+      }
+      
+      // Show a confirmation to the user
+      Alert.alert(
+        "Apple Sign-In Successful",
+        "Please review your information and complete the registration by adding any missing details.",
+        [{ text: "OK" }]
+      );
+    } catch (error) {
+      if (error.code !== 'ERR_CANCELED') {
+        console.error("Apple sign in error:", error);
+        Alert.alert("Error", "Failed to sign in with Apple. Please try again.");
+      }
+    } finally {
+      setIsAppleLoading(false);
+    }
+  };
+
   return (
     <TouchableWithoutFeedback onPress={() => {
       // Only dismiss keyboard, don't interfere with other touch events
@@ -395,6 +556,41 @@ export default function RegisterScreen() {
 
               <View style={styles.formContainer}>
                 <Text style={styles.title}>Create Account</Text>
+                
+                {/* Social Authentication Buttons */}
+                <View style={styles.socialAuthContainer}>
+                  <Text style={styles.socialAuthText}>Sign up with:</Text>
+                  
+                  <TouchableOpacity 
+                    style={[styles.socialButton, styles.googleButton, isGoogleLoading && styles.buttonDisabled]}
+                    onPress={handleGoogleSignIn}
+                    disabled={isGoogleLoading}
+                  >
+                    <Ionicons name="logo-google" size={20} color="#fff" />
+                    <Text style={styles.socialButtonText}>
+                      {isGoogleLoading ? 'Connecting...' : 'Google'}
+                    </Text>
+                  </TouchableOpacity>
+                  
+                  {appleAuthAvailable && (
+                    <TouchableOpacity 
+                      style={[styles.socialButton, styles.appleButton, isAppleLoading && styles.buttonDisabled]}
+                      onPress={handleAppleSignIn}
+                      disabled={isAppleLoading}
+                    >
+                      <Ionicons name="logo-apple" size={20} color="#fff" />
+                      <Text style={styles.socialButtonText}>
+                        {isAppleLoading ? 'Connecting...' : 'Apple'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                
+                <View style={styles.orContainer}>
+                  <View style={styles.divider} />
+                  <Text style={styles.orText}>OR</Text>
+                  <View style={styles.divider} />
+                </View>
                 
                 {/* Personal Information */}
                 <Text style={[styles.sectionTitle, styles.touchableText]}>Personal Information</Text>
@@ -547,19 +743,14 @@ export default function RegisterScreen() {
                   <View style={styles.notificationGroup}>
                     <Text style={styles.notificationGroupTitle}>App Notifications</Text>
                     <CheckboxItem 
-                      label="New Shows" 
-                      value={notificationPrefs.newShows}
-                      onToggle={() => toggleNotificationPref('newShows')}
+                      label="Artist Alerts" 
+                      value={notificationPrefs.artistAlerts}
+                      onToggle={() => toggleNotificationPref('artistAlerts')}
                     />
                     <CheckboxItem 
-                      label="Artist Updates" 
-                      value={notificationPrefs.artistUpdates}
-                      onToggle={() => toggleNotificationPref('artistUpdates')}
-                    />
-                    <CheckboxItem 
-                      label="App Updates" 
-                      value={notificationPrefs.appUpdates}
-                      onToggle={() => toggleNotificationPref('appUpdates')}
+                      label="Event Alerts" 
+                      value={notificationPrefs.eventAlerts}
+                      onToggle={() => toggleNotificationPref('eventAlerts')}
                     />
                   </View>
                   
@@ -569,11 +760,6 @@ export default function RegisterScreen() {
                       label="Newsletters" 
                       value={notificationPrefs.newsletters}
                       onToggle={() => toggleNotificationPref('newsletters')}
-                    />
-                    <CheckboxItem 
-                      label="Event Updates" 
-                      value={notificationPrefs.eventUpdates}
-                      onToggle={() => toggleNotificationPref('eventUpdates')}
                     />
                   </View>
                 </View>
@@ -902,5 +1088,50 @@ const styles = StyleSheet.create({
   },
   touchableText: {
     backgroundColor: 'transparent'
-  }
+  },
+  socialAuthContainer: {
+    marginBottom: 25,
+    alignItems: 'center',
+  },
+  socialAuthText: {
+    fontSize: 16,
+    marginBottom: 15,
+    color: BRAND_COLORS.primaryText,
+  },
+  socialButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    width: '100%',
+  },
+  googleButton: {
+    backgroundColor: '#4285F4',
+  },
+  appleButton: {
+    backgroundColor: '#000',
+  },
+  socialButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 10,
+  },
+  orContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  divider: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#ddd',
+  },
+  orText: {
+    paddingHorizontal: 10,
+    color: BRAND_COLORS.secondaryText || '#666',
+    fontSize: 14,
+  },
 }); 

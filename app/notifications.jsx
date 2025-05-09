@@ -1,154 +1,164 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
-  FlatList, 
   StyleSheet, 
-  SafeAreaView, 
+  FlatList, 
   TouchableOpacity, 
+  SafeAreaView,
   ActivityIndicator,
-  RefreshControl
+  Alert,
+  DeviceEventEmitter
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import axios from 'axios';
-import { useAuth } from './context/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BRAND_COLORS } from './styles/brandColors';
+import { formatDistanceToNow } from 'date-fns';
+import { 
+  markNotificationAsRead, 
+  getNotifications, 
+  markAllNotificationsAsRead 
+} from './utils/notificationStorage';
 
 export default function NotificationsScreen() {
-  const router = useRouter();
-  const { token, isLoggedIn } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const fetchNotifications = async () => {
-    if (!isLoggedIn) {
-      setLoading(false);
-      return;
-    }
-    
-    try {
-      setLoading(true);
-      const response = await axios.get(
-        `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/notifications`, 
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      
-      setNotifications(response.data || []);
-    } catch (error) {
-      console.error('Error fetching notifications:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+  const router = useRouter();
 
   useEffect(() => {
-    fetchNotifications();
-  }, [isLoggedIn, token]);
+    loadNotifications();
+  }, []);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchNotifications();
+  const loadNotifications = async () => {
+    try {
+      setLoading(true);
+      
+      // Get notifications from storage
+      const notifications = await getNotifications();
+      setNotifications(notifications);
+      
+      // Don't automatically mark all as read when opening the screen
+      // Only mark as read when user clicks the button or views individual notifications
+      
+    } catch (error) {
+      console.error('Error loading notifications:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+  const markAsRead = async (id) => {
+    try {
+      const success = await markNotificationAsRead(id);
+      if (success) {
+        // Update local state to show notification as read
+        const updatedNotifications = notifications.map(notification => 
+          notification.id === id ? { ...notification, read: true } : notification
+        );
+        setNotifications(updatedNotifications);
+        
+        // Get new unread count and emit event
+        const newCount = updatedNotifications.filter(n => !n.read).length;
+        DeviceEventEmitter.emit('notification_read', { count: newCount });
+      }
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+    }
+  };
+
+  const navigateToNotificationDetail = (notification) => {
+    // Mark as read when opening
+    markAsRead(notification.id);
+    router.push({
+      pathname: '/notification-detail',
+      params: { id: notification.id }
     });
   };
 
-  if (!isLoggedIn) {
+  const renderNotificationItem = ({ item }) => {
+    const timeAgo = formatDistanceToNow(new Date(item.date), { addSuffix: true });
+    
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <Ionicons name="arrow-back" size={24} color={BRAND_COLORS.primaryText} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Notifications</Text>
-          <View style={{ width: 24 }} />
+      <TouchableOpacity 
+        style={[styles.notificationItem, !item.read && styles.unreadNotification]} 
+        onPress={() => navigateToNotificationDetail(item)}
+      >
+        <View style={styles.notificationIcon}>
+          <Ionicons name={getIconForNotificationType(item.type)} size={24} color={BRAND_COLORS.accent} />
         </View>
-        <View style={styles.notLoggedInContainer}>
-          <Text style={styles.notLoggedInText}>
-            You need to be logged in to view notifications.
-          </Text>
-          <TouchableOpacity 
-            style={styles.loginButton}
-            onPress={() => router.push('/login')}
-          >
-            <Text style={styles.loginButtonText}>Log In</Text>
-          </TouchableOpacity>
+        <View style={styles.notificationContent}>
+          <Text style={styles.notificationTitle} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.notificationBody} numberOfLines={2}>{item.body}</Text>
+          <Text style={styles.notificationTime}>{timeAgo}</Text>
         </View>
-      </SafeAreaView>
+        {!item.read && <View style={styles.unreadDot} />}
+      </TouchableOpacity>
     );
-  }
+  };
+
+  const getIconForNotificationType = (type) => {
+    switch (type) {
+      case 'event': return 'calendar';
+      case 'artist': return 'person';
+      case 'system': return 'information-circle';
+      case 'promo': return 'pricetag';
+      default: return 'notifications';
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={BRAND_COLORS.primaryText} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Notifications</Text>
-        <View style={{ width: 24 }} />
+        <TouchableOpacity 
+          style={styles.rightButton}
+          onPress={async () => {
+            try {
+              const success = await markAllNotificationsAsRead();
+              if (success) {
+                // Refresh the notifications list with all marked as read
+                const updatedNotifications = notifications.map(notification => ({
+                  ...notification,
+                  read: true
+                }));
+                setNotifications(updatedNotifications);
+                
+                // Emit event to update unread count across the app
+                DeviceEventEmitter.emit('notification_read', { count: 0 });
+                
+                // Show quick feedback
+                Alert.alert("Success", "All notifications marked as read");
+              }
+            } catch (error) {
+              console.error('Error marking all as read:', error);
+              Alert.alert("Error", "Failed to mark notifications as read");
+            }
+          }}
+        >
+          <Ionicons name="checkmark-done" size={24} color={BRAND_COLORS.accent} />
+        </TouchableOpacity>
       </View>
 
-      {loading && !refreshing ? (
+      {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={BRAND_COLORS.accent} />
         </View>
-      ) : notifications.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="notifications-off-outline" size={60} color="#ccc" />
-          <Text style={styles.emptyText}>No notifications yet</Text>
-        </View>
-      ) : (
+      ) : notifications.length > 0 ? (
         <FlatList
           data={notifications}
-          keyExtractor={item => item._id || item.id || String(Math.random())}
-          renderItem={({ item }) => (
-            <View style={styles.notificationItem}>
-              <View style={styles.notificationHeader}>
-                <Ionicons 
-                  name={item.type === 'artist' ? 'person-outline' : 'radio-outline'} 
-                  size={24} 
-                  color={BRAND_COLORS.accent} 
-                />
-                <Text style={styles.notificationDate}>
-                  {formatDate(item.createdAt)}
-                </Text>
-              </View>
-              <Text style={styles.notificationTitle}>{item.title}</Text>
-              <Text style={styles.notificationBody}>{item.message}</Text>
-            </View>
-          )}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              colors={[BRAND_COLORS.accent]}
-              tintColor={BRAND_COLORS.accent}
-            />
-          }
-          contentContainerStyle={{ paddingBottom: 20 }}
+          renderItem={renderNotificationItem}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.listContent}
         />
+      ) : (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="notifications-off" size={64} color="#888" />
+          <Text style={styles.emptyText}>No notifications yet</Text>
+        </View>
       )}
     </SafeAreaView>
   );
@@ -162,18 +172,75 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 15,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
+  backButton: {
+    padding: 4,
+  },
   headerTitle: {
-    fontSize: 20,
+    flex: 1,
+    fontSize: 18,
     fontWeight: 'bold',
+    textAlign: 'center',
     color: BRAND_COLORS.primaryText,
   },
-  backButton: {
-    padding: 5,
+  rightButton: {
+    padding: 4,
+  },
+  listContent: {
+    padding: 16,
+  },
+  notificationItem: {
+    flexDirection: 'row',
+    backgroundColor: BRAND_COLORS.background === '#FFFFFF' ? '#FFFFFF' : '#1A1A1A',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  unreadNotification: {
+    backgroundColor: BRAND_COLORS.background === '#FFFFFF' ? '#F0F7FF' : '#1A2733',
+    borderLeftWidth: 3,
+    borderLeftColor: BRAND_COLORS.accent,
+  },
+  notificationIcon: {
+    marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationContent: {
+    flex: 1,
+  },
+  notificationTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+    color: BRAND_COLORS.primaryText,
+  },
+  notificationBody: {
+    fontSize: 14,
+    color: BRAND_COLORS.secondaryText || '#888',
+    marginBottom: 8,
+  },
+  notificationTime: {
+    fontSize: 12,
+    color: '#888',
+  },
+  unreadDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: BRAND_COLORS.accent,
+    position: 'absolute',
+    top: 16,
+    right: 16,
   },
   loadingContainer: {
     flex: 1,
@@ -184,61 +251,12 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: 24,
   },
   emptyText: {
-    marginTop: 10,
+    marginTop: 16,
     fontSize: 16,
     color: '#888',
     textAlign: 'center',
-  },
-  notificationItem: {
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-    backgroundColor: BRAND_COLORS.background,
-  },
-  notificationHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  notificationTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: BRAND_COLORS.primaryText,
-    marginBottom: 5,
-  },
-  notificationBody: {
-    fontSize: 14,
-    color: BRAND_COLORS.secondaryText || '#666',
-  },
-  notificationDate: {
-    fontSize: 12,
-    color: '#888',
-  },
-  notLoggedInContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  notLoggedInText: {
-    fontSize: 16,
-    color: BRAND_COLORS.secondaryText || '#666',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  loginButton: {
-    backgroundColor: BRAND_COLORS.accent,
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 8,
-  },
-  loginButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
   },
 });

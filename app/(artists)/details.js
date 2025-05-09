@@ -13,10 +13,9 @@ import {
   Dimensions,
   Share
 } from 'react-native';
-import { getValidToken } from '../utils/tokenManager';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
-import { useLocalSearchParams, useRouter, Link, useFocusEffect } from 'expo-router';
+import { useLocalSearchParams, useRouter, Link, useFocusEffect, usePathname } from 'expo-router';
 import Constants from 'expo-constants';
 import TopBanner from '../../components/TopBanner';
 import { usePlayer } from '../context/PlayerContext';
@@ -24,10 +23,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BRAND_COLORS } from '../styles/brandColors';
 import secureApi from '../../app/utils/api';
 import * as SecureStore from 'expo-secure-store';
+import CustomTabBar from '../../components/CustomTabBar';
 const { width, height } = Dimensions.get('window');
 const ArtistDetailsScreen = () => {
-  const { username, name, imageUrl, bio } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const { username, name, imageUrl, bio, artistId, showsData } = params;
   const router = useRouter();
+  const pathname = usePathname();
   const [shows, setShows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -37,10 +39,15 @@ const ArtistDetailsScreen = () => {
   const [subscribing, setSubscribing] = useState(false);
   const [artistBio, setArtistBio] = useState(bio || "");
   const [currentPlayingKey, setCurrentPlayingKey] = useState(null);
-  const mixcloudPlayerRef = useRef(null);
+  const [showsLoading, setShowsLoading] = useState(true);
+  const [bioLoading, setBioLoading] = useState(true);
+  const [socialLinks, setSocialLinks] = useState({
+    instagram: null,
+    twitter: null,
+    facebook: null,
+    website: null
+  });
   
-  // Get status bar height
-  const statusBarHeight = Constants.statusBarHeight || 0;
 
   useFocusEffect(
     React.useCallback(() => {
@@ -54,27 +61,183 @@ const ArtistDetailsScreen = () => {
   );
 
   const fetchArtistBio = async () => {
-    // This is a placeholder function - implement the actual API call to get artist bio
-    // For example:
     try {
-      const response = await secureApi.get(`https://api.mixcloud.com/${username}/`);
-      if (response.data && response.data.biog) {
-        setArtistBio(response.data.biog);
+      setBioLoading(true);
+      
+      // Check if artistId is available (from MongoDB)
+      if (artistId) {
+        // Fetch artist bio from MongoDB
+        const response = await axios.get(
+          `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/artists/${artistId}`
+        );
+        
+        if (response.data) {
+          const artist = response.data;
+          setArtistBio(artist.bio || '');
+          
+          // Set social links if available
+          if (artist.socialLinks) {
+            setSocialLinks({
+              instagram: artist.socialLinks.instagram || null,
+              twitter: artist.socialLinks.twitter || null,
+              facebook: artist.socialLinks.facebook || null,
+              website: artist.socialLinks.website || null
+            });
+          }
+        }
+      } else if (username) {
+        // Try to fetch the artist by username
+        try {
+          const response = await axios.get(
+            `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/artists?username=${username}`
+          );
+          
+          if (response.data && response.data.length > 0) {
+            const artist = response.data[0];
+            setArtistBio(artist.bio || '');
+            
+            // Also update the shows
+            if (artist.shows && artist.shows.length > 0) {
+              const formattedShows = artist.shows.map(show => ({
+                key: show.mixcloudKey,
+                name: show.title,
+                pictures: { 
+                  extra_large: show.imageUrl 
+                },
+                created_time: show.date,
+                genres: show.genres || []
+              }));
+              
+              setShows(formattedShows);
+            }
+          } else {
+            // Fallback to Mixcloud for legacy URLs
+            const mixcloudResponse = await secureApi.get(`https://api.mixcloud.com/${username}/`);
+            if (mixcloudResponse.data && mixcloudResponse.data.biog) {
+              setArtistBio(mixcloudResponse.data.biog);
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching artist by username:', error);
+          
+          // Fallback to Mixcloud
+          try {
+            const mixcloudResponse = await secureApi.get(`https://api.mixcloud.com/${username}/`);
+            if (mixcloudResponse.data && mixcloudResponse.data.biog) {
+              setArtistBio(mixcloudResponse.data.biog);
+            }
+          } catch (mixErr) {
+            console.error('Error fetching from Mixcloud:', mixErr);
+          }
+        }
       }
-    } catch (err) {
-      console.error('Failed to load artist bio:', err);
+    } catch (error) {
+      console.error('Error fetching artist bio:', error);
+      setError('Failed to load artist details');
+    } finally {
+      setBioLoading(false);
     }
   };
 
   const fetchArtistShows = async () => {
     try {
-      setLoading(true);
-      const response = await secureApi.get(`https://api.mixcloud.com/VoicesRadio/hosts/${username}`);
-      setShows(response.data.data);
-      setError(null);
+      setShowsLoading(true);
+      
+      // Check params for showsData using the variable from top level
+      if (showsData) {
+        try {
+          const parsedShows = JSON.parse(showsData);
+          const formattedShows = parsedShows.map(show => ({
+            key: show.mixcloudKey,
+            name: show.title,
+            pictures: { 
+              extra_large: show.imageUrl 
+            },
+            created_time: show.date,
+            genres: show.genres || []
+          }));
+          
+          setShows(formattedShows);
+          return;
+        } catch (parseError) {
+          console.error('Error parsing show data:', parseError);
+        }
+      }
+      
+      // Continue with the rest of the function as before
+      // Using artistId and username from the params at the top level
+      if (artistId) {
+        try {
+          const response = await axios.get(
+            `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/artists/${artistId}`
+          );
+          
+          if (response.data && response.data.shows) {
+            const formattedShows = response.data.shows.map(show => ({
+              key: show.mixcloudKey,
+              name: show.title,
+              pictures: { 
+                extra_large: show.imageUrl 
+              },
+              created_time: show.date,
+              genres: show.genres || []
+            }));
+            
+            setShows(formattedShows);
+          } else {
+            setError('No shows found for this artist');
+          }
+        } catch (error) {
+          console.error('Error fetching artist by ID:', error);
+          setError('Failed to load shows');
+        }
+      } else if (username) {
+        // Try to fetch by username
+        try {
+          const response = await axios.get(
+            `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/artists?username=${username}`
+          );
+          
+          if (response.data && response.data.length > 0) {
+            const artist = response.data[0];
+            
+            if (artist.shows && artist.shows.length > 0) {
+              const formattedShows = artist.shows.map(show => ({
+                key: show.mixcloudKey,
+                name: show.title,
+                pictures: { 
+                  extra_large: show.imageUrl 
+                },
+                created_time: show.date,
+                genres: show.genres || []
+              }));
+              
+              setShows(formattedShows);
+            } else {
+              setError('No shows found for this artist');
+            }
+          } else {
+            // Fallback to Mixcloud as last resort
+            const mixcloudResponse = await secureApi.get(`https://api.mixcloud.com/VoicesRadio/hosts/${username}`);
+            // Process Mixcloud response...
+            if (mixcloudResponse.data && mixcloudResponse.data.data) {
+              setShows(mixcloudResponse.data.data);
+            } else {
+              setError('No shows found for this artist');
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching artist by username:', error);
+          setError('Failed to load shows');
+        }
+      } else {
+        setError('No artist information provided');
+      }
     } catch (err) {
-      setError('Failed to load shows. Please try again.');
+      console.error('Error in fetchArtistShows:', err);
+      setError('Failed to load shows');
     } finally {
+      setShowsLoading(false);
       setLoading(false);
     }
   };
@@ -299,13 +462,7 @@ const ArtistDetailsScreen = () => {
   }, [activeTileId, isPlaying]);
 
   return (
-    <View style={styles.container}>
-      <SafeAreaView style={{
-        backgroundColor: 'black',
-        paddingTop: Platform.OS === 'ios' ? statusBarHeight : 0,
-      }}>
-      </SafeAreaView>
-      
+    <SafeAreaView style={styles.container}>
       <ScrollView 
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -412,7 +569,8 @@ const ArtistDetailsScreen = () => {
                 title: show.name,
                 imageUrl: show.pictures.extra_large,
                 key: show.key,
-                iframeUrl: `https://player-widget.mixcloud.com/widget/iframe/?hide_cover=1&mini=1&light=1&feed=${encodeURIComponent(show.key)}`
+                iframeUrl: `https://player-widget.mixcloud.com/widget/iframe/?hide_cover=1&mini=1&light=1&feed=${encodeURIComponent(show.key)}`,
+                source: 'mixcloud'
               };
 
               // Check if this tile is the currently playing one
@@ -424,14 +582,40 @@ const ArtistDetailsScreen = () => {
                   style={styles.showCard}
                   onPress={() => handleShowTilePress(tileData, index)}
                 >
-                  <Image 
-                    source={{ uri: show.pictures.extra_large }} 
-                    style={styles.showImage}
-                    resizeMode="cover"
-                  />
+                  <View style={styles.showImageContainer}>
+                    <View style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      overflow: 'hidden',
+                      borderTopLeftRadius: 12,
+                      borderTopRightRadius: 12,
+                    }}>
+                      <Image 
+                        source={{ uri: show.pictures.extra_large }} 
+                        style={{
+                          width: '100%',
+                          height: '140%'
+                        }}
+                      />
+                    </View>
+                  </View>
                   <View style={styles.showInfo}>
                     <Text style={styles.showName} numberOfLines={2}>{show.name}</Text>
                     <Text style={styles.showDate}>{formatDate(show.created_time)}</Text>
+                    
+                    {show.genres && show.genres.length > 0 && (
+                      <View style={styles.genreContainer}>
+                        {show.genres.map((genre, idx) => (
+                          <View key={idx} style={styles.genreTag}>
+                            <Text style={styles.genreText}>{genre}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                    
                     <TouchableOpacity 
                       style={styles.playButton}
                       onPress={() => handleShowTilePress(tileData, index)}
@@ -444,42 +628,8 @@ const ArtistDetailsScreen = () => {
           </View>
         )}
       </ScrollView>
-
-      <View style={styles.tabBar}>
-        <Link href="/(tabs)/" asChild>
-          <TouchableOpacity style={styles.tabItem}>
-            <Ionicons 
-              name="home"
-              size={24}
-              color="#8E8E93"
-            />
-            <Text style={styles.tabLabel}>Home</Text>
-          </TouchableOpacity>
-        </Link>
-        
-        <Link href="/(tabs)/artists" asChild>
-          <TouchableOpacity style={styles.tabItem}>
-            <Ionicons 
-              name="people"
-              size={24}
-              color={BRAND_COLORS.accent}
-            />
-            <Text style={[styles.tabLabel, styles.activeTabLabel]}>Artists</Text>
-          </TouchableOpacity>
-        </Link>
-        
-        <Link href="/(tabs)/settings" asChild>
-          <TouchableOpacity style={styles.tabItem}>
-            <Ionicons 
-              name="cog"
-              size={24}
-              color="#8E8E93"
-            />
-            <Text style={styles.tabLabel}>Settings</Text>
-          </TouchableOpacity>
-        </Link>
-      </View>
-    </View>
+      <CustomTabBar />
+    </SafeAreaView>
   );
 };
 
@@ -487,6 +637,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: BRAND_COLORS.background,
+    paddingBottom: Platform.OS === 'ios' ? 80 : 60,
     width: width,
     height: height
   },
@@ -671,11 +822,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: BRAND_COLORS.background === '#FFFFFF' ? '#EEEEEE' : '#333333',
   },
-  showImage: {
+  showImageContainer: {
     width: '100%',
     height: width * 0.5,
     borderTopLeftRadius: 12,
     borderTopRightRadius: 12,
+    overflow: 'hidden',
+    position: 'relative',
   },
   showInfo: {
     padding: 16,
@@ -701,35 +854,23 @@ const styles = StyleSheet.create({
     paddingTop: 0,
     paddingBottom: Platform.OS === 'ios' ? 100 : 80,
   },
-  tabBar: {
+  genreContainer: {
     flexDirection: 'row',
-    backgroundColor: BRAND_COLORS.background,
-    height: Platform.OS === 'ios' ? 80 : 60,
-    paddingBottom: Platform.OS === 'ios' ? 25 : 10,
-    paddingTop: 15,
-    borderTopWidth: 0,
-    elevation: 0,
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    justifyContent: 'space-around',
-    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginTop: 8,
+    marginBottom: 4,
   },
-  tabItem: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    height: '100%',
-    marginTop: 5,
+  genreTag: {
+    backgroundColor: BRAND_COLORS.accent + '33', // 20% opacity
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    marginRight: 8,
+    marginBottom: 8,
   },
-  tabLabel: {
-    fontSize: 11,
-    marginBottom: Platform.OS === 'ios' ? 8 : 5,
-    color: '#8E8E93',
-  },
-  activeTabLabel: {
-    color: BRAND_COLORS.accent,
+  genreText: {
+    color: BRAND_COLORS.primaryText,
+    fontSize: 14,
     fontWeight: '500',
   },
 });

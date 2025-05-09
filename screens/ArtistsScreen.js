@@ -23,6 +23,7 @@ import { useScroll } from '../app/context/ScrollContext';
 import { BRAND_COLORS } from '../app/styles/brandColors';
 import { fetchWithPinning } from '../app/utils/secureNetwork';
 import { getValidToken } from '../app/utils/tokenManager';
+import soundcloudAPI from '../app/utils/soundcloudAPI';
 const { width, height } = Dimensions.get('window');
 
 const ArtistsScreen = ({ navigation }) => {
@@ -50,6 +51,11 @@ const ArtistsScreen = ({ navigation }) => {
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [selectedGenres, setSelectedGenres] = useState([]);
   const [allGenres, setAllGenres] = useState([]);
+
+  // New state variables
+  const [soundcloudHosts, setSoundcloudHosts] = useState([]);
+  const [loadingSoundcloud, setLoadingSoundcloud] = useState(false);
+  const [combinedHosts, setCombinedHosts] = useState([]);
 
   // Get status bar height
   const statusBarHeight = Constants.statusBarHeight || 0;
@@ -108,6 +114,7 @@ const ArtistsScreen = ({ navigation }) => {
     const fetchData = async () => {
       if (isActive) {
         await fetchHosts();
+        await fetchSoundCloudTracks();
         await fetchSubscribedArtists();
         await checkSubscriptionStatus();
       }
@@ -135,89 +142,56 @@ const ArtistsScreen = ({ navigation }) => {
         setLoadingMore(true);
       }
 
-      // Calculate offset for pagination
-      const offset = (currentPage - 1) * 20;
+      // Calculate offset for pagination (keep this for future pagination support)
+      const limit = 20;
+      const offset = (currentPage - 1) * limit;
       
-      // Fetch hosts data
-      let response;
-      try {
-        response = await fetchWithPinning(`https://api.mixcloud.com/VoicesRadio/hosts/?limit=20&offset=${offset}`);
-      } catch (fetchError) {
-        console.log('Falling back to direct fetch');
-        const directResponse = await fetch(`https://api.mixcloud.com/VoicesRadio/hosts/?limit=20&offset=${offset}`);
-        const jsonData = await directResponse.json();
-        response = { data: jsonData };
-      }
+      // Fetch artists from MongoDB
+      // For now, we're not using pagination parameters since the API doesn't support it yet
+      const response = await axios.get(
+        `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/artists`
+      );
       
       // Ensure we have valid data
-      if (!response || !response.data || !response.data.data) {
+      if (!response || !response.data) {
         throw new Error('Invalid data format from server');
       }
       
-      console.log('Hosts fetched:', response.data.data.length);
+      // The response is an array directly, not an object with 'artists' property
+      const artistsData = response.data;
       
-      // Check if there are more pages to load
-      const hasMore = response.data.paging && response.data.paging.next;
-      setHasMorePages(!!hasMore);
+      console.log('Artists fetched:', artistsData.length);
       
-      // Fetch shows and genres for each host
-      const hostsWithShowsAndGenres = await Promise.all(
-        response.data.data.map(async (host) => {
-          try {
-            const showsResponse = await fetchWithPinning(`https://api.mixcloud.com/VoicesRadio/hosts/${host.username}`);
-            
-            // Extract and count genres from all shows
-            const shows = showsResponse.data.data || [];
-            const genreCounts = {};
-            
-            shows.forEach(show => {
-              if (show.tags && Array.isArray(show.tags)) {
-                show.tags.forEach(tag => {
-                  if (tag.name) {
-                    genreCounts[tag.name] = (genreCounts[tag.name] || 0) + 1;
-                  }
-                });
-              }
-            });
-            
-            // Convert to array and sort by count
-            const genresArray = Object.entries(genreCounts)
-              .map(([name, count]) => ({ name, count }))
-              .sort((a, b) => b.count - a.count);
-            
-            // Get top 3 genres
-            const topGenres = genresArray.slice(0, 3).map(genre => genre.name);
-            
-            return {
-              ...host,
-              showCount: shows.length,
-              genres: topGenres,
-              allGenres: genresArray // Keep all genres for potential use later
-            };
-          } catch (error) {
-            console.error(`Error fetching shows for ${host.username}:`, error);
-            return {
-              ...host,
-              showCount: 0,
-              genres: []
-            };
-          }
-        })
-      );
+      // Assume there's no more pages for now (can be updated when API supports pagination)
+      setHasMorePages(false);
       
-      // Update state with the hosts that include genres
+      // Transform data to match expected format
+      const formattedArtists = artistsData.map(artist => ({
+        _id: artist._id,
+        username: artist.mixcloudUsername || artist._id,
+        name: artist.name,
+        pictures: { 
+          extra_large: artist.imageUrl 
+        },
+        showCount: artist.shows?.length || 0,
+        // Use genres directly from MongoDB
+        genres: artist.genres?.slice(0, 3) || [],
+        allGenres: artist.genres?.map(genre => ({ name: genre, count: 1 })) || []
+      }));
+      
+      // Update state with the artists
       setHosts(prevHosts => {
         if (currentPage === 1) {
-          return hostsWithShowsAndGenres;
+          return formattedArtists;
         } else {
-          return [...prevHosts, ...hostsWithShowsAndGenres];
+          return [...prevHosts, ...formattedArtists];
         }
       });
 
       setError(null);
       setPage(currentPage);
     } catch (err) {
-      console.error('Error fetching hosts:', err);
+      console.error('Error fetching artists:', err);
       setError('Failed to load artists. Please check your internet connection and try again.');
     } finally {
       setLoading(false);
@@ -369,16 +343,137 @@ const ArtistsScreen = ({ navigation }) => {
     }
   };
 
-  const navigateToArtistDetails = (host) => {
-    router.push({
-      pathname: '/(artists)/details',
-      params: {
-        username: host.username,
-        name: host.name,
-        imageUrl: host.pictures.extra_large,
-        genres: host.genres ? host.genres.join(',') : ''
+  const fetchSoundCloudTracks = async () => {
+    console.log('Fetching SoundCloud tracks');
+    setLoadingSoundcloud(true);
+    
+    try {
+      const tracks = await soundcloudAPI.getVoicesTracks(50, 0);
+      console.log(`Fetched ${tracks.length} SoundCloud tracks`);
+      
+      // Extract artists from track titles
+      const artistsMap = new Map();
+      
+      tracks.forEach(track => {
+        const artistName = soundcloudAPI.extractArtistFromTitle(track.title);
+        if (artistName) {
+          // Create or update artist in our map
+          if (!artistsMap.has(artistName.toLowerCase())) {
+            artistsMap.set(artistName.toLowerCase(), {
+              username: artistName.toLowerCase().replace(/\s+/g, ''),
+              name: artistName,
+              source: 'soundcloud',
+              pictures: { 
+                extra_large: track.artwork_url ? track.artwork_url.replace('-large', '-t500x500') : null 
+              },
+              showCount: 1,
+              genres: track.genre ? [track.genre] : [],
+              // Store track IDs associated with this artist
+              trackIds: [track.id]
+            });
+          } else {
+            // Update existing artist
+            const artist = artistsMap.get(artistName.toLowerCase());
+            artist.showCount++;
+            // Add genre if not already included
+            if (track.genre && !artist.genres.includes(track.genre)) {
+              artist.genres.push(track.genre);
+            }
+            // Add track ID to list
+            artist.trackIds.push(track.id);
+          }
+        }
+      });
+      
+      // Convert map to array
+      const soundcloudArtists = Array.from(artistsMap.values());
+      console.log(`Extracted ${soundcloudArtists.length} SoundCloud artists`);
+      
+      setSoundcloudHosts(soundcloudArtists);
+    } catch (error) {
+      console.error('Failed to fetch SoundCloud tracks:', error);
+    } finally {
+      setLoadingSoundcloud(false);
+    }
+  };
+
+  const combineHosts = () => {
+    // Create a map of Mixcloud hosts by lowercase name
+    const mixcloudHostMap = new Map();
+    hosts.forEach(host => {
+      mixcloudHostMap.set(host.name.toLowerCase(), host);
+    });
+    
+    // Start with Mixcloud hosts
+    const combined = [...hosts];
+    
+    // Add SoundCloud hosts that don't exist in Mixcloud
+    soundcloudHosts.forEach(scHost => {
+      if (!mixcloudHostMap.has(scHost.name.toLowerCase())) {
+        combined.push(scHost);
       }
     });
+    
+    setCombinedHosts(combined);
+    console.log(`Combined ${hosts.length} Mixcloud + ${soundcloudHosts.length} SoundCloud hosts = ${combined.length} total`);
+  };
+
+  useEffect(() => {
+    if (combinedHosts.length > 0) {
+      let filtered = [...combinedHosts];
+      
+      // Apply search filter
+      if (searchQuery.trim() !== '') {
+        const query = searchQuery.toLowerCase();
+        filtered = filtered.filter(host => 
+          host.name.toLowerCase().includes(query)
+        );
+      }
+      
+      // Apply genre filter
+      if (selectedGenres.length > 0) {
+        filtered = filtered.filter(host => {
+          // Check if any of the host's genres match any selected genre
+          return host.genres && host.genres.some(genre => 
+            selectedGenres.includes(genre)
+          );
+        });
+      }
+      
+      setFilteredHosts(filtered);
+    } else {
+      setFilteredHosts([]);
+    }
+  }, [combinedHosts, searchQuery, selectedGenres]);
+
+  const navigateToArtistDetails = (host) => {
+    if (host.source === 'soundcloud') {
+      // For SoundCloud artists
+      router.push({
+        pathname: '/(artists)/details',
+        params: {
+          username: host.username,
+          name: host.name,
+          imageUrl: host.pictures.extra_large,
+          genres: host.genres ? host.genres.join(',') : '',
+          source: 'soundcloud',
+          trackIds: host.trackIds ? host.trackIds.join(',') : '',
+          artistId: host._id
+        }
+      });
+    } else {
+      // For MongoDB artists
+      router.push({
+        pathname: '/(artists)/details',
+        params: {
+          username: host.mixcloudUsername || host.username,
+          name: host.name,
+          imageUrl: host.pictures.extra_large,
+          genres: host.genres ? host.genres.join(',') : '',
+          artistId: host._id
+        }
+      });
+    }
   };
 
   const renderHost = ({ item }) => {
@@ -392,10 +487,16 @@ const ArtistsScreen = ({ navigation }) => {
       >
         <View style={styles.imageContainer}>
           <Image 
-            source={{ uri: item.pictures.extra_large }} 
+            source={{ uri: item.pictures.extra_large || 'https://via.placeholder.com/100' }} 
             style={styles.hostImage}
             resizeMode="cover"
           />
+          {/* Display source badge if SoundCloud */}
+          {item.source === 'soundcloud' && (
+            <View style={styles.sourceBadge}>
+              <Text style={styles.sourceBadgeText}>SoundCloud</Text>
+            </View>
+          )}
           <TouchableOpacity 
             style={[
               styles.subscribeButton,
@@ -403,7 +504,7 @@ const ArtistsScreen = ({ navigation }) => {
             ]}
             onPress={(e) => {
               e.stopPropagation();
-              if (!isSubscribing) { // Prevent multiple clicks
+              if (!isSubscribing) {
                 handleSubscribe(item.username);
               }
             }}
@@ -431,9 +532,9 @@ const ArtistsScreen = ({ navigation }) => {
             <View style={styles.genresContainer}>
               {item.genres.map((genre, index) => (
                 <View key={index} style={styles.genreTag}>
-              <Text style={styles.genreText}>{genre}</Text>
-            </View>
-          ))}
+                  <Text style={styles.genreText}>{genre}</Text>
+                </View>
+              ))}
             </View>
           )}
         </View>
@@ -995,6 +1096,20 @@ const styles = StyleSheet.create({
   loadingMoreText: {
     marginTop: 8,
     color: 'gray',
+  },
+  sourceBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    backgroundColor: '#ff7700', // SoundCloud orange
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderTopLeftRadius: 6,
+  },
+  sourceBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
 });
 

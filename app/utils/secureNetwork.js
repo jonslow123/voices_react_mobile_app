@@ -1,5 +1,3 @@
-// app/utils/secureNetwork.js
-import { fetch as secureFetch } from 'react-native-ssl-pinning';
 
 // Certificate hashes for your domains - get these from your backend team
 const CERTIFICATES = {

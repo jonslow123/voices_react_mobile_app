@@ -12,7 +12,8 @@ import {
   Platform,
   Dimensions,
   Linking,
-  TextInput
+  TextInput,
+  DeviceEventEmitter
 } from 'react-native';
 import ProfileSection from '../../components/ProfileSection'; 
 import { useRouter } from 'expo-router';
@@ -26,11 +27,16 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import * as Clipboard from 'expo-clipboard';
 import * as SecureStore from 'expo-secure-store';
+import { getUnreadCount } from '../utils/notificationStorage';
 import { 
   isBiometricAvailable, 
   setBiometricAuthEnabled, 
   getBiometricAuthEnabled
 } from '../../app/utils/biometricAuth';
+import { sendTestNotification, simulateManualPushNotification } from '../utils/notificationTest';
+import * as StoreReview from 'expo-store-review';
+import * as Constants from 'expo-constants';
+
 const API_URL = `${process.env.EXPO_PUBLIC_BACKEND_URL}`;
 const { width, height } = Dimensions.get('window');
 
@@ -207,18 +213,24 @@ const CollapsibleSection = ({ title, children }) => {
 };
 
 export default function SettingsScreen() {
-  const { isLoggedIn, setIsLoggedIn, token, userId, logout } = useAuth();
+  const { isAuthenticated, token, userId, logout, checkAuthentication } = useAuth();
   const router = useRouter();
+  
+  // Move biometric hooks here
+  const [biometricSupported, setBiometricSupported] = useState(false);
+  const [biometricType, setBiometricType] = useState('');
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+  
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [savingPreference, setSavingPreference] = useState(null);
   const [tokenCheckDone, setTokenCheckDone] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   
   // Email preferences
   const [newsletters, setNewsletters] = useState(true);
   const [eventUpdates, setEventUpdates] = useState(true);
   const [artistAlerts, setArtistAlerts] = useState(true);
-  const [marketingEmails, setMarketingEmails] = useState(false);
   
   // Notification preferences
   const [newShows, setNewShows] = useState(true);
@@ -227,8 +239,8 @@ export default function SettingsScreen() {
   
   // Renamed 'events' to 'eventNotifications' to avoid conflict
   const [preferences, setPreferences] = useState({
-    newShows: false,
-    eventNotifications: false,
+    artistAlerts: false,
+    eventAlerts: false,
     newsletters: false
   });
   
@@ -239,21 +251,70 @@ export default function SettingsScreen() {
     email: ''
   });
   
+  // Load unread notification count
+  useEffect(() => {
+    const loadUnreadCount = async () => {
+      const count = await getUnreadCount();
+      setUnreadCount(count);
+    };
+    
+    // Load immediately
+    loadUnreadCount();
+    
+    // Create a notification subscription - this will catch new notifications
+    const subscription = Notifications.addNotificationReceivedListener(() => {
+      loadUnreadCount();
+    });
+    
+    // Also listen for notification_read events from other screens
+    const readEventSubscription = DeviceEventEmitter.addListener(
+      'notification_read',
+      (data) => {
+        console.log('Received notification_read event with count:', data.count);
+        setUnreadCount(data.count);
+      }
+    );
+    
+    // Listen for new notification stored events
+    const storedEventSubscription = DeviceEventEmitter.addListener(
+      'notification_stored',
+      (data) => {
+        console.log('Received notification_stored event with count:', data.count);
+        setUnreadCount(data.count);
+      }
+    );
+    
+    // Clean up subscriptions on component unmount
+    return () => {
+      subscription.remove();
+      readEventSubscription.remove();
+      storedEventSubscription.remove();
+    };
+  }, []);
+  
+  // Separate useEffect for handling route state changes
+  useEffect(() => {
+    // Refresh count when router state changes (i.e., when navigating back to this screen)
+    const loadUnreadCount = async () => {
+      const count = await getUnreadCount();
+      setUnreadCount(count);
+    };
+    
+    loadUnreadCount();
+    console.log('Settings screen focused, refreshing notification count');
+  }, [router.state]);
+  
   // Check token before any data fetch
   useEffect(() => {
     const checkToken = async () => {
       try {
-        // Check if token exists in SecureStore
-        const storedToken = await SecureStore.getItemAsync('userToken');
-        
-        if (!storedToken) {
-          console.log('No stored token found, redirecting to login');
+        const isAuth = await checkAuthentication();
+        if (!isAuth) {
+          console.log('Not authenticated, redirecting to login');
+          router.replace('/login');
+        } else {
           setTokenCheckDone(true);
-          return;
         }
-        
-        // If we get here, token exists, proceed with fetch
-        setTokenCheckDone(true);
       } catch (error) {
         console.error('Error checking token:', error);
         setTokenCheckDone(true);
@@ -263,14 +324,38 @@ export default function SettingsScreen() {
     checkToken();
   }, []);
   
+  // Add this useEffect to check biometric availability
+  useEffect(() => {
+    const checkBiometrics = async () => {
+      const biometricStatus = await isBiometricAvailable();
+      
+      if (biometricStatus.available) {
+        setBiometricSupported(true);
+        setBiometricType(biometricStatus.biometryType);
+        
+        // Load user's preference
+        const enabled = await getBiometricAuthEnabled();
+        setBiometricEnabled(enabled);
+      }
+    };
+    
+    checkBiometrics();
+  }, []);
+
+  // Add a function to handle toggling biometric auth
+  const handleToggleBiometricAuth = async (value) => {
+    await setBiometricAuthEnabled(value);
+    setBiometricEnabled(value);
+  };
+  
   // Fetch user data after token check is complete
   useEffect(() => {
-    if (tokenCheckDone && isLoggedIn) {
+    if (tokenCheckDone && isAuthenticated) {
       fetchUserData();
     } else if (tokenCheckDone) {
       setLoading(false);
     }
-  }, [tokenCheckDone, isLoggedIn]);
+  }, [tokenCheckDone, isAuthenticated]);
   
   const fetchUserData = useCallback(async () => {
     try {
@@ -298,17 +383,28 @@ export default function SettingsScreen() {
       console.log('User data received:', response.data ? 'success' : 'empty');
       
       // Store user data
-      setUser(response.data);
-      
-      // Extract and map preferences
-      const mappedPreferences = {
-        newShows: response.data.notificationPreferences?.newShows === true,
-        eventNotifications: response.data.emailPreferences?.eventUpdates === true,
-        newsletters: response.data.emailPreferences?.newsletters === true
-      };
-      
-      // Set the initial preferences state
-      setPreferences(mappedPreferences);
+      if (response.data) {
+        setUser(response.data);
+        
+        console.log('Raw API response data:', response.data);
+        console.log('Notification preferences from API:', response.data.notificationPreferences);
+        console.log('Newsletters from API:', response.data.newsletters);
+        
+        // Extract and map preferences - use explicit boolean conversion
+        const mappedPreferences = {
+          artistAlerts: response.data.notificationPreferences?.artistAlerts === true,
+          eventAlerts: response.data.notificationPreferences?.eventAlerts === true,
+          newsletters: response.data.newsletters === true
+        };
+        
+        console.log('Mapped preferences as explicit booleans:', mappedPreferences);
+        
+        // Set the initial preferences state
+        setPreferences(mappedPreferences);
+      } else {
+        console.error('Invalid user data format in response:', response.data);
+        Alert.alert('Error', 'Received invalid user data format from server');
+      }
       
     } catch (error) {
       console.error('Error fetching user data:', error);
@@ -327,13 +423,22 @@ export default function SettingsScreen() {
     }
   }, [token]);
   
+  // Add a debugging function to inspect preferences state
+  const logPreferencesState = (message) => {
+    console.log(`--- ${message} ---`);
+    console.log(`artistAlerts: ${preferences.artistAlerts}`);
+    console.log(`eventAlerts: ${preferences.eventAlerts}`);
+    console.log(`newsletters: ${preferences.newsletters}`);
+    console.log('--------------------');
+  };
+
   const handleTogglePreference = async (key) => {
     try {
       // Define mappings
       const prefMappings = {
-        'newShows': { field: 'notificationPreferences', key: 'newShows' },
-        'eventNotifications': { field: 'emailPreferences', key: 'eventUpdates' },
-        'newsletters': { field: 'emailPreferences', key: 'newsletters' }
+        'artistAlerts': { field: 'notificationPreferences', key: 'artistAlerts' },
+        'eventAlerts': { field: 'notificationPreferences', key: 'eventAlerts' },
+        'newsletters': { field: 'root', key: 'newsletters' }
       };
       
       const mapping = prefMappings[key];
@@ -342,33 +447,42 @@ export default function SettingsScreen() {
         return;
       }
       
+      // Log before state
+      console.log(`--- BEFORE toggle ---`);
+      console.log(`Current preferences state:`, preferences);
+      
       // Get current value and new value
       const currentValue = preferences[key] === true;
       const newValue = !currentValue;
       
+      console.log(`Toggling ${key} from ${currentValue} to ${newValue}`);
+      
       // Store the previous preferences for rollback if needed
       const prevPreferences = {...preferences};
       
-      // Optimistically update UI
+      // Optimistically update UI - only update the one that changed
       setPreferences(prev => ({
-        ...prev,
-        [key]: newValue
+        ...prev, // Keep all existing values
+        [key]: newValue // Only update the one that changed
       }));
       
       // Create update data
-      const notificationPrefs = { ...(user.notificationPreferences || {}) };
-      const emailPrefs = { ...(user.emailPreferences || {}) };
+      const notificationPrefs = { ...(user?.notificationPreferences || {}) };
+      let updateData = {};
       
+      // Set the specific preference that's being updated
       if (mapping.field === 'notificationPreferences') {
         notificationPrefs[mapping.key] = newValue;
-      } else {
-        emailPrefs[mapping.key] = newValue;
+        updateData.notificationPreferences = notificationPrefs;
+      } else if (mapping.field === 'root') {
+        // For root level fields like newsletters
+        updateData[mapping.key] = newValue;
       }
       
-      const updateData = {
-        notificationPreferences: notificationPrefs,
-        emailPreferences: emailPrefs
-      };
+      console.log('Sending preference update to backend:', JSON.stringify(updateData, null, 2));
+      
+      // Store the expected updated value to confirm API behavior
+      const expectedNewValue = newValue;
       
       // Send update to backend
       const response = await axios.patch(
@@ -382,23 +496,102 @@ export default function SettingsScreen() {
         }
       );
       
+      console.log('Preference update response:', JSON.stringify(response.data, null, 2));
+      
       // Update user data with response
-      setUser(response.data);
-      
-      // Extract updated preferences from the response
-      const updatedRawPrefs = {
-        emailPreferences: response.data.emailPreferences || {},
-        notificationPreferences: response.data.notificationPreferences || {}
-      };
-      
-      const updatedMappedPrefs = {
-        newShows: updatedRawPrefs.notificationPreferences.newShows === true,
-        eventNotifications: updatedRawPrefs.emailPreferences.eventUpdates === true,
-        newsletters: updatedRawPrefs.emailPreferences.newsletters === true
-      };
-      
-      // Update preferences state with all values from the backend
-      setPreferences(updatedMappedPrefs);
+      if (response.data) {
+        setUser(response.data);
+        
+        // Extract updated preferences from the response
+        const updatedRawPrefs = {
+          newsletters: response.data.newsletters,
+          notificationPreferences: response.data.notificationPreferences || {}
+        };
+        
+        // Log raw values from server to debug
+        console.log('Raw notificationPreferences from server:', updatedRawPrefs.notificationPreferences);
+        console.log('Raw newsletters from server:', updatedRawPrefs.newsletters);
+        
+        // Check if the preference objects from server are empty or null
+        const notificationPrefsEmpty = !updatedRawPrefs.notificationPreferences || 
+                                     Object.keys(updatedRawPrefs.notificationPreferences).length === 0;
+        const newslettersEmpty = updatedRawPrefs.newsletters === undefined;
+        
+        console.log(`Server returned empty data - notificationPreferences: ${notificationPrefsEmpty}, newsletters: ${newslettersEmpty}`);
+        
+        // If server returned empty objects, preserve our current preferences except for the one we just changed
+        if (notificationPrefsEmpty || newslettersEmpty) {
+          console.log('Server returned empty preference data, preserving current preferences');
+          
+          // Clone current preferences to build from
+          if (notificationPrefsEmpty) {
+            // Create notificationPreferences based on current preferences state
+            updatedRawPrefs.notificationPreferences = {
+              artistAlerts: preferences.artistAlerts,
+              eventAlerts: preferences.eventAlerts
+            };
+            
+            // Override just the one we changed
+            if (mapping.field === 'notificationPreferences') {
+              updatedRawPrefs.notificationPreferences[mapping.key] = expectedNewValue;
+            }
+          }
+          
+          if (newslettersEmpty) {
+            // Set newsletters from current state
+            updatedRawPrefs.newsletters = preferences.newsletters;
+            
+            // Override if this is what was changed
+            if (mapping.field === 'root' && mapping.key === 'newsletters') {
+              updatedRawPrefs.newsletters = expectedNewValue;
+            }
+          }
+          
+          console.log('Reconstructed preferences to use:', updatedRawPrefs);
+        }
+        
+        // Check if server returned the expected value for the changed preference
+        let serverReturnedCorrectValue = false;
+        if (mapping.field === 'notificationPreferences') {
+          serverReturnedCorrectValue = updatedRawPrefs.notificationPreferences[mapping.key] === expectedNewValue;
+        } else if (mapping.field === 'root') {
+          serverReturnedCorrectValue = updatedRawPrefs[mapping.key] === expectedNewValue;
+        }
+        
+        console.log(`Server returned the expected value (${expectedNewValue}) for ${key}: ${serverReturnedCorrectValue}`);
+        
+        if (!serverReturnedCorrectValue) {
+          console.log('Server did not return the expected value for this preference');
+          console.log('Using local state instead of server response for this preference');
+          
+          // Override the server value with our expected value since server didn't save it
+          if (mapping.field === 'notificationPreferences') {
+            updatedRawPrefs.notificationPreferences[mapping.key] = expectedNewValue;
+          } else if (mapping.field === 'root') {
+            updatedRawPrefs[mapping.key] = expectedNewValue;
+          }
+        }
+        
+        // Map the response to our frontend preferences state
+        const updatedMappedPrefs = {
+          artistAlerts: updatedRawPrefs.notificationPreferences.artistAlerts === true,
+          eventAlerts: updatedRawPrefs.notificationPreferences.eventAlerts === true,
+          newsletters: updatedRawPrefs.newsletters === true
+        };
+        
+        console.log('Actual preferences being set:', updatedMappedPrefs);
+        
+        // Update preferences state with all values from the backend (or overridden)
+        setPreferences(updatedMappedPrefs);
+        
+        console.log(`--- AFTER API response ---`);
+        console.log(`Updated preferences state:`, updatedMappedPrefs);
+      } else {
+        // If response doesn't contain user data, revert to previous state
+        console.log('Invalid response, reverting to previous state:', prevPreferences);
+        setPreferences(prevPreferences);
+        Alert.alert('Update Failed', 'Server response missing user data. Please try again.');
+      }
       
     } catch (error) {
       console.error('Error updating preference:', error);
@@ -406,17 +599,15 @@ export default function SettingsScreen() {
       // On error, revert to previous preferences state
       setPreferences(prevPreferences);
       
-      if (error.response && error.response.status === 401) {
-        // Handle unauthorized errors
-        await SecureStore.deleteItemAsync('userToken');
-        await AsyncStorage.removeItem('user');
-        router.replace('/login');
-      } else {
-        Alert.alert(
-          'Update Failed',
-          'Failed to update preference. Please try again.'
-        );
+      if (error.response) {
+        console.error('Error response:', error.response.data);
+        console.error('Status code:', error.response.status);
       }
+      
+      Alert.alert(
+        'Update Failed',
+        'Failed to update preference. Please try again.'
+      );
     }
   };
   
@@ -439,7 +630,7 @@ export default function SettingsScreen() {
   };
   
   // If not logged in, show login prompt
-  if (!isLoggedIn && tokenCheckDone) {
+  if (!isAuthenticated && tokenCheckDone) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.notLoggedInContainer}>
@@ -469,34 +660,54 @@ export default function SettingsScreen() {
     );
   }
 
-  // Inside your SettingsScreen component
-  // Add these state variables
-  const [biometricSupported, setBiometricSupported] = useState(false);
-  const [biometricType, setBiometricType] = useState('');
-  const [biometricEnabled, setBiometricEnabled] = useState(false);
-
-  // Add this useEffect to check biometric availability
-  useEffect(() => {
-    const checkBiometrics = async () => {
-      const biometricStatus = await isBiometricAvailable();
+  // Inside your Settings component, add this function to handle app store reviews
+  const handleAppReview = async () => {
+    try {
+      // Check if the device can open the store
+      const canReview = await StoreReview.hasAction();
       
-      if (biometricStatus.available) {
-        setBiometricSupported(true);
-        setBiometricType(biometricStatus.biometryType);
+      if (canReview) {
+        // Use the StoreReview API on iOS (opens in-app review prompt)
+        if (Platform.OS === 'ios') {
+          StoreReview.requestReview();
+        } else {
+          // For Android, we'll open the store page directly
+          // Replace with your actual package name when available
+          const packageName = 'com.voicesradio.app'; // This is a placeholder
+          Linking.openURL(`market://details?id=${packageName}`);
+        }
+      } else {
+        // Fallback to store URLs if in-app review isn't available
+        const storeUrl = Platform.OS === 'ios'
+          ? 'https://apps.apple.com/app/idYOUR_APP_ID' // Replace with your App Store ID
+          : 'https://play.google.com/store/apps/details?id=com.voicesradio.app'; // Replace with your package name
         
-        // Load user's preference
-        const enabled = await getBiometricAuthEnabled();
-        setBiometricEnabled(enabled);
+        Linking.openURL(storeUrl);
       }
-    };
-    
-    checkBiometrics();
-  }, []);
+    } catch (error) {
+      console.error('Failed to open app store review:', error);
+      Alert.alert('Error', 'Could not open the app store. Please try again later.');
+    }
+  };
 
-  // Add a function to handle toggling biometric auth
-  const handleToggleBiometricAuth = async (value) => {
-    await setBiometricAuthEnabled(value);
-    setBiometricEnabled(value);
+  // Function to handle sending feedback email
+  const handleSendFeedback = () => {
+    try {
+      // Get app and device info for the email
+      const appVersion = Constants.expoConfig?.version || 'Unknown';
+      const deviceInfo = `${Device.modelName || 'Unknown device'} (${Platform.OS} ${Platform.Version})`;
+      
+      // Create email URI with subject and body
+      const emailSubject = encodeURIComponent(`Voices Radio App Feedback - v${appVersion}`);
+      const emailBody = encodeURIComponent(
+        `\n\n\n--\nApp version: ${appVersion}\nDevice: ${deviceInfo}`
+      );
+      
+      Linking.openURL(`mailto:voices.general@gmail.com?subject=${emailSubject}&body=${emailBody}`);
+    } catch (error) {
+      console.error('Failed to open email client:', error);
+      Alert.alert('Error', 'Could not open email client. Please send feedback to voices.general@gmail.com');
+    }
   };
 
   return (
@@ -504,6 +715,19 @@ export default function SettingsScreen() {
       <ScrollView contentContainerStyle={styles.contentContainer}>
         <View style={styles.header}>
           <Text style={styles.title}>My Profile</Text>
+          <TouchableOpacity 
+            style={styles.notificationBell} 
+            onPress={() => router.push('/notifications')}
+          >
+            <Ionicons name="notifications-outline" size={24} color={BRAND_COLORS.accent} />
+            {unreadCount > 0 && (
+              <View style={styles.badgeContainer}>
+                <Text style={styles.badgeText}>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
         </View>
         
         {/* Use the ProfileSection component with isExpanded=false */}
@@ -517,18 +741,26 @@ export default function SettingsScreen() {
         {/* App Notifications Section - using the new CollapsibleSection */}
         <CollapsibleSection title="App Notifications">
           <View style={styles.preferencesContainer}>
+            {console.log('RENDERING Artist Alerts toggle:', preferences)}
             <PreferenceToggle 
-              title="New Shows"
-              description="Get notified when new shows are added"
-              value={preferences.newShows}
-              onToggle={() => handleTogglePreference('newShows')}
+              title="Artist Alerts"
+              description="Get notified just before your favourite artists go live"
+              value={Boolean(preferences.artistAlerts)}
+              onToggle={() => {
+                console.log('Artist Alerts toggle pressed, current value:', preferences.artistAlerts);
+                handleTogglePreference('artistAlerts');
+              }}
             />
             
+            {console.log('RENDERING Events toggle:', preferences)}
             <PreferenceToggle 
-              title="Events"
+              title="Event Alerts"
               description="Receive notifications about upcoming events"
-              value={preferences.eventNotifications}
-              onToggle={() => handleTogglePreference('eventNotifications')}
+              value={Boolean(preferences.eventAlerts)}
+              onToggle={() => {
+                console.log('Events toggle pressed, current value:', preferences.eventAlerts);
+                handleTogglePreference('eventAlerts');
+              }}
               isLast={true}
             />
           </View>
@@ -537,27 +769,17 @@ export default function SettingsScreen() {
         {/* Email Preferences Section */}
         <CollapsibleSection title="Email Preferences">
           <View style={styles.preferencesContainer}>
+            {console.log('RENDERING Newsletters toggle:', preferences)}
             <PreferenceToggle 
               title="Newsletters"
               description="Receive our weekly newsletter"
-              value={preferences.newsletters}
-              onToggle={() => handleTogglePreference('newsletters')}
+              value={Boolean(preferences.newsletters)}
+              onToggle={() => {
+                console.log('Newsletters toggle pressed, current value:', preferences.newsletters);
+                handleTogglePreference('newsletters');
+              }}
               isLast={true}
             />
-          </View>
-        </CollapsibleSection>
-        
-        {/* My Favorites Section */}
-        <CollapsibleSection title="My Favorites">
-          <View style={styles.accountContainer}>
-            <TouchableOpacity 
-              style={[styles.actionButton, styles.lastActionButton]}
-              onPress={() => router.push('/subscribed-artists')}
-            >
-              <Ionicons name="star" size={20} color={BRAND_COLORS.black} />
-              <Text style={styles.actionButtonText}>Subscribed Artists</Text>
-              <Ionicons name="chevron-forward" size={20} color={BRAND_COLORS.black} />
-            </TouchableOpacity>
           </View>
         </CollapsibleSection>
         
@@ -612,14 +834,14 @@ export default function SettingsScreen() {
           </View>
         </CollapsibleSection>
         
-        {/* Admin Section */}
+        {/* Admin Section 
         <CollapsibleSection title="Admin">
           <AdminPushTokenSection />
-        </CollapsibleSection>
+        </CollapsibleSection>*/}
         
         {/* Security Section */}
-        {biometricSupported && (
-          <CollapsibleSection title="Security">
+        <CollapsibleSection title="Security">
+          {biometricSupported ? (
             <View style={styles.preferencesContainer}>
               <PreferenceToggle 
                 title={`${biometricType} Login`}
@@ -629,8 +851,140 @@ export default function SettingsScreen() {
                 isLast={true}
               />
             </View>
-          </CollapsibleSection>
-        )}
+          ) : (
+            <View style={styles.preferencesContainer}>
+              <Text style={{padding: 14, color: '#666'}}>
+                Biometric authentication is not available on this device
+              </Text>
+            </View>
+          )}
+        </CollapsibleSection>
+        
+        {/* Developer/Debug Section 
+        <CollapsibleSection title="Developer">
+          <View style={styles.accountContainer}>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={async () => {
+                try {
+                  const success = await sendTestNotification();
+                  if (success) {
+                    Alert.alert(
+                      "Test Notification Sent", 
+                      "A test notification has been triggered. You should see it appear even if the app is in the foreground."
+                    );
+                  } else {
+                    Alert.alert(
+                      "Error", 
+                      "Failed to send test notification. Check console for details."
+                    );
+                  }
+                } catch (error) {
+                  console.error("Error sending test notification:", error);
+                  Alert.alert("Error", "An unexpected error occurred");
+                }
+              }}
+            >
+              <Ionicons name="notifications-outline" size={20} color={BRAND_COLORS.black} />
+              <Text style={styles.actionButtonText}>Test Notification</Text>
+              <Ionicons name="chevron-forward" size={20} color={BRAND_COLORS.black} />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={async () => {
+                try {
+                  const { debugNotificationCount } = require('../utils/notificationTest');
+                  await debugNotificationCount();
+                  Alert.alert("Debug", "Notification count debug test executed. Check console logs.");
+                } catch (error) {
+                  console.error("Error in notification debug:", error);
+                  Alert.alert("Error", "Failed to run debug test");
+                }
+              }}
+            >
+              <Ionicons name="bug-outline" size={20} color={BRAND_COLORS.black} />
+              <Text style={styles.actionButtonText}>Debug Badge Count</Text>
+              <Ionicons name="chevron-forward" size={20} color={BRAND_COLORS.black} />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => {
+                Alert.alert(
+                  "Simulate Manual Notification", 
+                  "Choose a notification type to simulate:", 
+                  [
+                    {
+                      text: "Event Notification",
+                      onPress: async () => {
+                        await simulateManualPushNotification('event');
+                      }
+                    },
+                    {
+                      text: "Artist Notification",
+                      onPress: async () => {
+                        await simulateManualPushNotification('artist');
+                      }
+                    },
+                    {
+                      text: "Promo Notification",
+                      onPress: async () => {
+                        await simulateManualPushNotification('promo');
+                      }
+                    },
+                    {
+                      text: "System Notification",
+                      onPress: async () => {
+                        await simulateManualPushNotification('system');
+                      }
+                    },
+                    {
+                      text: "Cancel",
+                      style: "cancel"
+                    }
+                  ]
+                );
+              }}
+            >
+              <Ionicons name="planet-outline" size={20} color={BRAND_COLORS.black} />
+              <Text style={styles.actionButtonText}>Simulate Manual Notification</Text>
+              <Ionicons name="chevron-forward" size={20} color={BRAND_COLORS.black} />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.lastActionButton]}
+              onPress={() => router.push('/admin-panel')}
+            >
+              <Ionicons name="construct-outline" size={20} color={BRAND_COLORS.black} />
+              <Text style={styles.actionButtonText}>Admin Panel</Text>
+              <Ionicons name="chevron-forward" size={20} color={BRAND_COLORS.black} />
+            </TouchableOpacity>
+          </View>
+        </CollapsibleSection>*/}
+        
+        {/* Change the Feedback section to a CollapsibleSection */}
+        <CollapsibleSection title="Feedback">
+          <View style={styles.accountContainer}>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={handleAppReview}
+            >
+              <Ionicons name="star-outline" size={20} color={BRAND_COLORS.black} />
+              <Text style={styles.actionButtonText}>Leave a Review</Text>
+              <Ionicons name="chevron-forward" size={20} color={BRAND_COLORS.black} />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.lastActionButton]}
+              onPress={handleSendFeedback}
+            >
+              <Ionicons name="mail-outline" size={20} color={BRAND_COLORS.black} />
+              <Text style={styles.actionButtonText}>Send Feedback</Text>
+              <Ionicons name="chevron-forward" size={20} color={BRAND_COLORS.black} />
+            </TouchableOpacity>
+          </View>
+        </CollapsibleSection>
         
         <Text style={styles.versionText}>Version 1.0.0</Text>
       </ScrollView>
@@ -647,7 +1001,7 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     padding: 16,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+    paddingBottom: Platform.OS === 'ios' ? 130 : 110,
   },
   header: {
     flexDirection: 'row',
@@ -801,5 +1155,39 @@ const styles = StyleSheet.create({
     color: 'gray',
     fontSize: 12,
     marginTop: 16,
+  },
+  notificationBell: {
+    padding: 5,
+    position: 'relative',
+  },
+  badgeContainer: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    backgroundColor: 'red',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: BRAND_COLORS.background,
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  settingInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  settingIcon: {
+    marginRight: 10,
+  },
+  settingLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
   },
 }); 

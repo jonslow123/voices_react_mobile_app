@@ -42,6 +42,13 @@ export default function ArtistDetailLayout() {
             }}
           />
           <Tabs.Screen
+            name="subscribed"
+            options={{
+              title: 'Your Favourites',
+              tabBarIcon: ({ color }) => <Ionicons name="heart" size={24} color={color} />,
+            }}
+          />
+          <Tabs.Screen
             name="settings"
             options={{
               title: 'My Profile',

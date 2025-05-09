@@ -20,7 +20,11 @@ const { width, height } = Dimensions.get('window');
 
 function decodeHTMLEntities(text) {
   if (!text) return '';
-  return text
+  
+  // Force conversion to string if not already a string
+  const textStr = String(text);
+  
+  return textStr
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -293,16 +297,18 @@ const styles = StyleSheet.create({
   headerContainer: {
     alignItems: 'center',
     marginBottom: 10,
+    paddingTop: 15,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    marginBottom: 4,
+    marginBottom: 8,
+    marginTop: 5,
   },
   backButton: {
-    padding: 4,
+    padding: 8,
   },
   title: {
     flex: 1,
@@ -323,9 +329,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 16,
+    paddingVertical: 20,
     paddingHorizontal: 24,
-    backgroundColor: BRAND_COLORS.surface,
+    marginTop: 5,
   },
   dateNavButton: {
     padding: 8,

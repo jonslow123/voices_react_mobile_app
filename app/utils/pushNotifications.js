@@ -3,6 +3,7 @@ import * as DeviceModule from 'expo-device';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import { storeNotification } from './notificationStorage';
 
 // Don't try to assign to imported modules
 const Notifications = NotificationsModule;
@@ -88,9 +89,10 @@ export async function registerForPushNotifications() {
       // Save token
       await AsyncStorage.setItem('pushToken', token);
       
+      // Configure notification handler to show alerts even when app is in foreground
       Notifications.setNotificationHandler({
         handleNotification: async () => ({
-          shouldShowAlert: true,
+          shouldShowAlert: true,  // Show alert even in foreground
           shouldPlaySound: true,
           shouldSetBadge: false,
         }),
@@ -124,17 +126,77 @@ export function setupNotificationListeners(navigation) {
   try {
     console.log('Setting up notification listeners...');
     
+    // This listener is triggered when a notification is received while the app is in foreground
     const foregroundSubscription = Notifications.addNotificationReceivedListener(notification => {
-      console.log('Notification received in foreground:', notification);
+      try {
+        console.log('Notification received in foreground:', notification);
+        
+        // Store the notification in our local storage
+        const notificationData = notification.request.content;
+        
+        // Create a notification object to store
+        const notificationToStore = {
+          title: notificationData.title || 'New Notification',
+          body: notificationData.body || '',
+          data: notificationData.data || {},
+          date: new Date().toISOString(),
+          read: false,
+          type: notificationData.data?.type || 'system'
+        };
+        
+        // Store the notification for later retrieval
+        storeNotification(notificationToStore)
+          .then(() => console.log('Notification stored successfully'))
+          .catch(error => console.error('Failed to store notification:', error));
+          
+      } catch (error) {
+        console.error('Error processing foreground notification:', error);
+      }
     });
     console.log('Foreground listener set up');
     
+    // This listener is triggered when user taps on a notification
     const backgroundSubscription = Notifications.addNotificationResponseReceivedListener(response => {
-      console.log('Notification response received:', response);
-      const { data } = response.notification.request.content;
-      
-      if (data?.type === 'show_alert' && data?.artistUsername) {
-        navigation.navigate('/(artists)/details', { username: data.artistUsername });
+      try {
+        console.log('Notification response received:', response);
+        
+        // Store the notification in our local storage
+        const notificationData = response.notification.request.content;
+        
+        // Create a notification object to store
+        const notificationToStore = {
+          title: notificationData.title || 'New Notification',
+          body: notificationData.body || '',
+          data: notificationData.data || {},
+          date: new Date().toISOString(),
+          read: true, // Mark as read since user tapped on it
+          type: notificationData.data?.type || 'system'
+        };
+        
+        // Store the notification
+        storeNotification(notificationToStore)
+          .then(() => console.log('Notification stored successfully'))
+          .catch(error => console.error('Failed to store notification:', error));
+        
+        // Extract data for navigation
+        const { data } = response.notification.request.content;
+        
+        // Navigate based on notification data
+        if (data?.type === 'show_alert' && data?.artistUsername) {
+          navigation.navigate('/(artists)/details', { username: data.artistUsername });
+        }
+        
+        // Add more navigation handlers based on your notification types
+        if (data?.type === 'new_show') {
+          navigation.navigate('/(tabs)/shows');
+        }
+        
+        // If there's no specific navigation target, show the notification detail
+        if (data?.notificationId) {
+          navigation.navigate('/notification-detail', { id: data.notificationId });
+        }
+      } catch (error) {
+        console.error('Error processing background notification:', error);
       }
     });
     console.log('Background listener set up');

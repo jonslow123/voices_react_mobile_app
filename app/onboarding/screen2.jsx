@@ -83,9 +83,8 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     paddingHorizontal: 24,
-    paddingTop: 40,
   },
   logoContainer: {
     alignItems: 'center',
@@ -104,10 +103,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 100,
   },
-  textContainer: {
-    alignItems: 'center',
-    marginBottom: 60,
-  },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
@@ -120,6 +115,7 @@ const styles = StyleSheet.create({
     color: BRAND_COLORS.secondaryText,
     textAlign: 'center',
     lineHeight: 24,
+    marginBottom: 40,
   },
   paginationContainer: {
     flexDirection: 'row',
@@ -151,14 +147,6 @@ const styles = StyleSheet.create({
     color: BRAND_COLORS.secondaryText,
     fontSize: 16,
   },
-  navigationButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backButton: {
-    padding: 12,
-    marginRight: 8,
-  },
   nextButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -171,6 +159,14 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
+    marginRight: 8,
+  },
+  navigationButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backButton: {
+    padding: 12,
     marginRight: 8,
   },
 });

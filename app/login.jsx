@@ -20,7 +20,11 @@ import { BRAND_COLORS } from './styles/brandColors';
 import { Dimensions } from 'react-native';
 import { 
   authenticateWithBiometrics, 
-  getBiometricAuthEnabled 
+  getBiometricAuthEnabled,
+  isBiometricAvailable,
+  setBiometricAuthEnabled,
+  hasBiometricPromptBeenShown,
+  markBiometricPromptAsShown
 } from './utils/biometricAuth';
 import * as SecureStore from 'expo-secure-store';
 const { width, height } = Dimensions.get('window');
@@ -41,17 +45,23 @@ export default function LoginScreen() {
 
   useEffect(() => {
     const checkBiometricAuth = async () => {
-      const enabled = await getBiometricAuthEnabled();
-      
-      if (enabled) {
-        const savedEmail = await SecureStore.getItemAsync('userEmail');
-        const hasSavedCredentials = !!savedEmail;
+      try {
+        // Check if biometric auth is enabled and determine what type is available
+        const { available, biometryType } = await isBiometricAvailable();
         
-        setBiometricAvailable(hasSavedCredentials);
-        
-        if (hasSavedCredentials) {
-          handleBiometricLogin();
+        if (available) {
+          setBiometricType(biometryType);
+          
+          // Check if we have saved credentials
+          const enabled = await getBiometricAuthEnabled();
+          const savedEmail = await SecureStore.getItemAsync('userEmail');
+          const hasSavedCredentials = enabled && !!savedEmail;
+          
+          // Make the button available but don't automatically trigger the scan
+          setBiometricAvailable(hasSavedCredentials);
         }
+      } catch (error) {
+        console.error('Error checking biometric availability:', error);
       }
     };
     
@@ -72,7 +82,17 @@ export default function LoginScreen() {
           setUsername(savedEmail);
           setPassword(savedPassword);
           
-          await handleLogin();
+          try {
+            await login({ 
+              email: savedEmail,
+              password: savedPassword 
+            });
+            
+            router.replace('/(tabs)');
+          } catch (error) {
+            console.error('Error logging in with biometrics:', error);
+            Alert.alert('Login Failed', 'Failed to log in with biometric authentication. Please try again or log in manually.');
+          }
         } else {
           Alert.alert('Error', 'No saved credentials found. Please login with email and password.');
         }
@@ -90,6 +110,12 @@ export default function LoginScreen() {
   };
 
   const handleLogin = async () => {
+    if (!login) {
+      console.error('Authentication context is not available');
+      Alert.alert('Error', 'Authentication service is not available. Please try again later.');
+      return;
+    }
+
     if (!username || !password) {
       Alert.alert('Error', 'Please enter both email and password');
       return;
@@ -98,23 +124,56 @@ export default function LoginScreen() {
     setIsLoading(true);
 
     try {
-      const response = await axios.post(`${API_URL}/login`, {
+      await login({ 
         email: username,
-        password
+        password 
       });
-
-      const { token, user } = response.data;
       
-      await login({ email: username, password });
+      const savedToken = await SecureStore.getItemAsync('userToken');
+      console.log('Token saved after login:', !!savedToken);
       
-      // On successful login, save credentials if biometric auth is enabled
+      // Check if biometric is available but not yet enabled
+      const biometricStatus = await isBiometricAvailable();
+      const biometricPromptShown = await hasBiometricPromptBeenShown();
       const biometricEnabled = await getBiometricAuthEnabled();
-      if (biometricEnabled) {
-        await SecureStore.setItemAsync('userEmail', username);
-        await SecureStore.setItemAsync('userPassword', password);
-      }
       
-      router.replace('/(tabs)');
+      if (biometricStatus.available && !biometricPromptShown && !biometricEnabled) {
+        // Ask if they want to enable biometric login
+        await markBiometricPromptAsShown(); // Mark that we've shown the prompt
+        
+        Alert.alert(
+          `Enable ${biometricStatus.biometryType} Login`,
+          `Would you like to use ${biometricStatus.biometryType} for faster login next time?`,
+          [
+            {
+              text: 'No, Thanks',
+              style: 'cancel',
+              onPress: () => {
+                // Store preference to not use biometrics
+                setBiometricAuthEnabled(false);
+                router.replace('/(tabs)');
+              }
+            },
+            {
+              text: 'Enable',
+              onPress: async () => {
+                // Save credentials securely
+                await SecureStore.setItemAsync('userEmail', username);
+                await SecureStore.setItemAsync('userPassword', password);
+                await setBiometricAuthEnabled(true);
+                router.replace('/(tabs)');
+              }
+            }
+          ]
+        );
+      } else {
+        // If they've already set a preference, respect it
+        if (biometricEnabled) {
+          await SecureStore.setItemAsync('userEmail', username);
+          await SecureStore.setItemAsync('userPassword', password);
+        }
+        router.replace('/(tabs)');
+      }
     } catch (error) {
       let errorMessage = 'Invalid credentials';
       
@@ -137,6 +196,7 @@ export default function LoginScreen() {
                 { text: 'OK' }
               ]
             );
+            setIsLoading(false);
             return;
           }
         }
@@ -144,8 +204,15 @@ export default function LoginScreen() {
         if (error.response.data && error.response.data.message) {
           errorMessage = error.response.data.message;
         }
+        
+        if (error.response.status === 500) {
+          errorMessage = 'The server encountered an error. Please try again later.';
+          console.log('Server error occurred:', error.response.data);
+        }
       } else if (error.request) {
-        errorMessage = 'Unable to connect to server';
+        errorMessage = 'Unable to connect to server. Please check your internet connection.';
+      } else if (error.message) {
+        errorMessage = error.message;
       }
 
       console.error('Login error:', error);
@@ -254,7 +321,7 @@ export default function LoginScreen() {
               onPress={handleBiometricLogin}
             >
               <Ionicons 
-                name={biometricType === 'Face ID' ? 'face-recognition' : 'finger-print'} 
+                name={biometricType === 'Face ID' ? 'happy' : 'finger-print'} 
                 size={24} 
                 color={BRAND_COLORS.accent} 
               />

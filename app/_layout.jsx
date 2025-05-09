@@ -1,20 +1,33 @@
 import React, { useEffect, useRef, useState } from 'react';
+import 'react-native-gesture-handler';
 import { View, StyleSheet, Linking, Platform, Alert, Text, TouchableOpacity } from 'react-native';
-import { Stack, usePathname } from 'expo-router';
+import { Stack, usePathname, Tabs } from 'expo-router';
 import AuthContextProvider from './context/auth';
 import { PlayerContextProvider } from './context/PlayerContext';
 import { router, useRouter } from 'expo-router';
 import { ScrollProvider } from './context/ScrollContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
 import { 
   registerForPushNotifications, 
   setupNotificationListeners,
   getTokenFromStorage 
 } from './utils/pushNotifications';
 import { testNotifications } from './utils/notificationTest';
-import BottomPlayerBar from '../components/BottomPlayerBar';
 import { Ionicons } from '@expo/vector-icons';
 import { BRAND_COLORS } from './styles/brandColors';
+import CustomTabBar from '../components/CustomTabBar';
+import { useAuth } from './context/auth';
+
+
+// Set up notification handler at the app level to ensure it's configured early
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,  // Show alerts in foreground
+    shouldPlaySound: true,  // Play sound
+    shouldSetBadge: false,  // Don't set badge
+  }),
+});
 
 export default function RootLayout() {
   const router = useRouter();
@@ -186,22 +199,40 @@ export default function RootLayout() {
     <AuthContextProvider>
       <PlayerContextProvider>
         <ScrollProvider>
-          <Stack
-            screenOptions={{
-              headerShown: false,
-            }}
-          >
-            <Stack.Screen name="index" />
-            <Stack.Screen name="onboarding" />
-            <Stack.Screen name="login" />
-            <Stack.Screen name="register" />
-            <Stack.Screen name="verify-email" />
-            <Stack.Screen name="resend-verification" />
-            <Stack.Screen name="reset-password" />
-            <Stack.Screen name="(tabs)" />
-          </Stack>
+          <RootLayoutNav />
         </ScrollProvider>
       </PlayerContextProvider>
     </AuthContextProvider>
+  );
+}
+
+function RootLayoutNav() {
+  // This hook should return the authentication status
+  const { token } = useAuth();
+  const isAuthenticated = !!token;
+
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      {/* Common screens accessible to all */}
+      <Stack.Screen name="index" />
+      
+      {/* Auth-specific screens that should NOT show tabs */}
+      {!isAuthenticated ? (
+        <>
+          <Stack.Screen name="login" options={{ animation: 'fade' }} />
+          <Stack.Screen name="register" options={{ animation: 'fade' }} />
+          <Stack.Screen name="forgot-password" options={{ animation: 'fade' }} />
+          <Stack.Screen name="resend-verification" options={{ animation: 'fade' }} />
+          <Stack.Screen name="change-email" options={{ animation: 'fade' }} />
+        </>
+      ) : null}
+      
+      {/* Main app screens that need tabs */}
+      <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
+      
+      {/* Other screens */}
+      <Stack.Screen name="schedule" options={{ animation: 'fade' }} />
+      <Stack.Screen name="(artists)" options={{ animation: 'fade' }} />
+    </Stack>
   );
 }

@@ -63,31 +63,37 @@ const ShowsScreen = () => {
 
   // Effect to filter shows based on search query and selected genres
   useEffect(() => {
-    if (shows.length > 0) {
-      let filtered = [...shows];
-      
-      // Apply search filter
-      if (searchQuery.trim() !== '') {
-        const query = searchQuery.toLowerCase();
-        filtered = filtered.filter(show => 
-          show.name.toLowerCase().includes(query)
-        );
-      }
-      
-      // Apply genre filter
-      if (selectedGenres.length > 0) {
-        filtered = filtered.filter(show => {
-          // Check if any of the show's genres match any selected genre
-          return show.genres && show.genres.some(genre => 
-            selectedGenres.includes(genre)
+    // Create a timer that will apply the search after a short delay
+    const timer = setTimeout(() => {
+      // This is where the actual filtering happens
+      if (shows.length > 0) {
+        let filtered = [...shows];
+        
+        // Apply search filter
+        if (searchQuery.trim() !== '') {
+          const query = searchQuery.toLowerCase();
+          filtered = filtered.filter(show => 
+            show.name.toLowerCase().includes(query)
           );
-        });
+        }
+        
+        // Apply genre filter
+        if (selectedGenres.length > 0) {
+          filtered = filtered.filter(show => {
+            return show.genres && show.genres.some(genre => 
+              selectedGenres.includes(genre)
+            );
+          });
+        }
+        
+        setFilteredShows(filtered);
+      } else {
+        setFilteredShows([]);
       }
-      
-      setFilteredShows(filtered);
-    } else {
-      setFilteredShows([]);
-    }
+    }, 500); // 500ms delay before applying search
+
+    // Clear the timer on cleanup to prevent memory leaks
+    return () => clearTimeout(timer);
   }, [shows, searchQuery, selectedGenres]);
 
   useEffect(() => {
@@ -252,7 +258,8 @@ const ShowsScreen = () => {
             title: item.name,
             imageUrl: item.imageUrl,
             key: item.key,
-            iframeUrl: item.playUrl
+            iframeUrl: item.playUrl,
+            source: 'mixcloud'
           };
           
           // Use the player context to handle playback
@@ -267,8 +274,6 @@ const ShowsScreen = () => {
         
         <View style={styles.showInfo}>
           <Text style={styles.showName} numberOfLines={2}>{item.name}</Text>
-          <Text style={styles.artistName} numberOfLines={1}>by {item.owner}</Text>
-          
           {item.genres && item.genres.length > 0 && (
             <View style={styles.genreContainer}>
               {item.genres.map((genre, index) => (
@@ -363,11 +368,6 @@ const ShowsScreen = () => {
           onEndReachedThreshold={0.5}
           refreshing={refreshing}
           onRefresh={handleRefresh}
-          ListFooterComponent={
-            loadingMore ? 
-              <ActivityIndicator size="large" color={BRAND_COLORS.accent} style={styles.loadMoreSpinner} /> 
-              : null
-          }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="radio-outline" size={64} color={BRAND_COLORS.secondaryText} />
@@ -571,7 +571,7 @@ const styles = StyleSheet.create({
     padding: 5,
   },
   genreList: {
-    maxHeight: '60%',
+    maxHeight: '70%',
   },
   genreItem: {
     flexDirection: 'row',
@@ -595,8 +595,10 @@ const styles = StyleSheet.create({
     borderTopColor: BRAND_COLORS.border || '#333',
   },
   clearButton: {
+    backgroundColor: BRAND_COLORS.accent,
+    borderRadius: 8,
     paddingVertical: 10,
-    paddingHorizontal: 15,
+    paddingHorizontal: 20,
   },
   clearButtonText: {
     color: BRAND_COLORS.secondaryText || '#999',

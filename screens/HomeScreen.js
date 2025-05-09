@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { 
   View, 
   Text, 
@@ -14,8 +14,10 @@ import {
   useWindowDimensions,
   SafeAreaView,
   StatusBar,
-  Alert
+  Alert,
+  ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
 import axios from 'axios';
@@ -26,6 +28,7 @@ import { useRouter, usePathname, Link } from 'expo-router';
 import { BRAND_COLORS } from '../app/styles/brandColors';
 import eventBus from '../app/utils/eventBus';
 import playerState from '../app/utils/playerState';
+import * as Constants from 'expo-constants';
 
 // Get screen width for responsive sizing
 const { width, height } = Dimensions.get('window');
@@ -36,7 +39,16 @@ const FALLBACK_IMAGE_URL = 'https://via.placeholder.com/600x600/007AFF/FFFFFF?te
 const VOICES_LOGO_URL = require('../assets/logo.png');
 
 const HomeScreen = () => {
-  const { handleTilePress, activeTileId, isPlaying, togglePlayback, miniPlayerVisible } = usePlayer();
+  const { 
+    handleTilePress, 
+    activeTileId, 
+    isPlaying, 
+    togglePlayback, 
+    miniPlayerVisible,
+    handleAirtimeStream,
+    isHeaderPlaying,
+    isLoadingHeader
+  } = usePlayer();
   const [tiles, setTiles] = useState([]);
   const [liveInfo, setLiveInfo] = useState(null);
   const [isLoadingTiles, setIsLoadingTiles] = useState(true);
@@ -53,8 +65,6 @@ const HomeScreen = () => {
   // New states for the top banner
   const [currentArtistImage, setCurrentArtistImage] = useState(null);
   const [currentShowName, setCurrentShowName] = useState('Voices Radio Live');
-  const [isAirtimePlaying, setIsAirtimePlaying] = useState(false);
-  const [isLoadingAirtime, setIsLoadingAirtime] = useState(false);
   const [currentTime, setCurrentTime] = useState('');
   const [nextShowTime, setNextShowTime] = useState('');
   const [nextShowName, setNextShowName] = useState('');
@@ -64,6 +74,11 @@ const HomeScreen = () => {
   const [voicesHosts, setVoicesHosts] = useState([]);
 
   const router = useRouter();
+
+  // Add state to track current index
+  const [currentCarouselIndex, setCurrentCarouselIndex] = useState(0);
+
+  const insets = useSafeAreaInsets();
 
   // Extract Mixcloud path
   const extractMixcloudPath = (iframeUrl) => {
@@ -122,7 +137,8 @@ const HomeScreen = () => {
           key: mixcloudPath,
           mixcloudPath: mixcloudPath,
           iframeUrl: `https://player-widget.mixcloud.com/widget/iframe/?hide_cover=1&mini=1&light=1&feed=${encodeURIComponent(mixcloudPath)}`,
-          genres: []
+          genres: [],
+          source: 'mixcloud'
         };
       });
       
@@ -139,12 +155,13 @@ const HomeScreen = () => {
                 imageUrl: mixcloudData.imageUrl,
                 mixcloudTitle: mixcloudData.title,
                 mixcloudDescription: mixcloudData.description,
-                genres: mixcloudData.genres || []
+                genres: mixcloudData.genres || [],
+                source: 'mixcloud'
               }
             };
           }
         }
-        return { index, updates: { imageUrl: FALLBACK_IMAGE_URL, genres: [] } };
+        return { index, updates: { imageUrl: FALLBACK_IMAGE_URL, genres: [], source: null } };
       });
       
       // Apply all updates once they're ready
@@ -425,66 +442,16 @@ const HomeScreen = () => {
   // Toggle Airtime stream using Expo Audio
   const toggleAirtimeStream = async () => {
     try {
-      if (isAirtimePlaying) {
-        // Stopping playback
-        setIsLoadingAirtime(true);
-        
-        if (soundRef.current) {
-          await soundRef.current.stopAsync();
-          await soundRef.current.unloadAsync();
-          soundRef.current = null;
-        }
-        
-        setIsAirtimePlaying(false);
-        setIsLoadingAirtime(false);
-      } else {
-        // Starting playback
-        setIsLoadingAirtime(true);
-        
-        // Basic audio configuration
-        await Audio.setAudioModeAsync({
-          playsInSilentModeIOS: true,
-          staysActiveInBackground: true,
-        });
-        
-        // Load the stream
-        const { sound } = await Audio.Sound.createAsync(
-          { uri: 'https://voicesradio.out.airtime.pro/voicesradio_a'},
-          { shouldPlay: true },
-          // This is where we set up status updates - directly on the sound object
-          (status) => {
-            // This is the onPlaybackStatusUpdate callback
-            console.log('Playback status:', status);
-            
-            // Update your UI based on status if needed
-            if (status.isLoaded) {
-              // Sound is loaded
-              if (status.isPlaying) {
-                // Sound is playing
-              } else {
-                // Sound is paused
-              }
-            } else if (status.error) {
-              // An error occurred
-              console.error('Playback error:', status.error);
-              setIsAirtimePlaying(false);
-              setIsLoadingAirtime(false);
-            }
-          }
-        );
-        
-        // Store the sound reference
-        soundRef.current = sound;
-        setIsAirtimePlaying(true);
-        setIsLoadingAirtime(false);
-        
-        // No need to call setMetadataAsync as it doesn't exist
-        // If needed, manage metadata in your app state instead
-      }
+      // Create the show info object with current show details
+      const showInfo = {
+        title: decodeHTMLEntities(currentShowName || 'Voices Radio Live')
+      };
+      
+      // Pass the current artist image as well
+      handleAirtimeStream(showInfo, currentArtistImage);
     } catch (error) {
       console.error('Error in toggleAirtimeStream:', error);
-      setIsAirtimePlaying(false);
-      setIsLoadingAirtime(false);
+      Alert.alert('Playback Error', 'Unable to play the radio stream. Please try again later.');
     }
   };
 
@@ -579,33 +546,30 @@ const HomeScreen = () => {
     return async () => {
       clearInterval(interval);
       
-      // Proper audio cleanup
-      if (soundRef.current) {
-        try {
-          await soundRef.current.stopAsync();
-          await soundRef.current.unloadAsync();
-          soundRef.current = null;
-          await Audio.setAudioModeAsync({ staysActiveInBackground: false });
-        } catch (e) {
-          console.error('Error cleaning up audio:', e);
-        }
-      }
+      // Don't stop audio on unmount - just clean up component resources
+      // We want the audio to continue in the background
     };
   }, []);
 
   // Add this effect to update lock screen metadata when the current show changes
   useEffect(() => {
     // We'll just update the app state, can't update system metadata directly
-    if (isAirtimePlaying && currentShowName) {
+    if (isHeaderPlaying && currentShowName) {
       // Update any UI components that need to show this info
       // No need to call any Audio API methods here
       console.log('Now playing:', currentShowName);
     }
-  }, [isAirtimePlaying, currentShowName]);
+  }, [isHeaderPlaying, currentShowName]);
 
   const handleScroll = (event) => {
     const scrollX = event.nativeEvent.contentOffset.x;
     updateScrollPosition('home', scrollX);
+    
+    // Calculate current index for pagination dots
+    const newIndex = Math.round(scrollX / CAROUSEL_TILE_WIDTH);
+    if (newIndex !== currentCarouselIndex && newIndex >= 0 && newIndex < tiles.length) {
+      setCurrentCarouselIndex(newIndex);
+    }
   };
 
   useEffect(() => {
@@ -630,8 +594,65 @@ const HomeScreen = () => {
     return Math.max(0, (tiles.length - 1) * CAROUSEL_TILE_WIDTH);
   };
 
+  const Pagination = ({ currentIndex, totalItems }) => {
+    const dots = useMemo(() => {
+      return Array(totalItems).fill(0).map((_, index) => (
+        <View
+          key={index}
+          style={[
+            styles.paginationDot,
+            { backgroundColor: currentIndex === index ? BRAND_COLORS.accent : '#D3D3D3' }
+          ]}
+        />
+      ));
+    }, [currentIndex, totalItems]);
+
+    return (
+      <View style={styles.paginationContainer}>
+        {dots}
+      </View>
+    );
+  };
+
+  // Modify how we handle mini player visibility
+  useEffect(() => {
+    // Instead of adjusting the FlatList, we'll let ScrollView handle the content
+    // This useEffect can stay empty or be removed if not needed for other purposes
+  }, [miniPlayerVisible]);
+
+  // Add this helper function inside your component before the return statement
+  const TopAlignedImage = ({ source, style }) => {
+    return (
+      <View style={[style, { overflow: 'hidden' }]}>
+        <Image 
+          source={source}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100%',
+            height: undefined,
+            aspectRatio: 1,  // This forces square aspect ratio
+          }}
+          resizeMode="cover"
+        />
+      </View>
+    );
+  };
+
   return (
-   <View style={styles.container}>
+    // Replace View with ScrollView to make the content scrollable
+    <ScrollView 
+      style={[styles.container, { paddingTop: insets.top }]}
+      contentContainerStyle={[
+        styles.contentContainer,
+        // Add padding at the bottom when MiniPlayer is visible
+        miniPlayerVisible && { paddingBottom: 90 }
+      ]}
+      showsVerticalScrollIndicator={false}
+    >
       <StatusBar barStyle="light-content" />
       
       {/* Action Buttons Container (Watch Live and Chat) */}
@@ -670,13 +691,13 @@ const HomeScreen = () => {
             <TouchableOpacity 
               style={styles.airtimePlayButton}
               onPress={toggleAirtimeStream}
-              disabled={isLoadingAirtime}
+              disabled={isLoadingHeader}
             >
-              {isLoadingAirtime ? (
+              {isLoadingHeader ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <Ionicons 
-                  name={isAirtimePlaying ? "pause" : "play"} 
+                  name={isHeaderPlaying ? "pause" : "play"} 
                   size={36} 
                   color="#FFFFFF" 
                 />
@@ -703,7 +724,7 @@ const HomeScreen = () => {
         </ImageBackground>
       </View>
       
-      {/* Featured Shows Section - Fixed size with absolute positioning */}
+      {/* Featured Shows Section - Change from absolute positioning to normal layout */}
       <View style={styles.featuredSection}>
         <Text style={styles.sectionTitle}>Voices HQ Picks</Text>
         
@@ -737,7 +758,8 @@ const HomeScreen = () => {
                   title: item.title,
                   imageUrl: item.imageUrl || FALLBACK_IMAGE_URL,
                   key: item.key,
-                  iframeUrl: item.iframeUrl
+                  iframeUrl: item.iframeUrl,
+                  source: item.source
                 };
 
                 const isThisTilePlaying = activeTileId === item._id && isPlaying;
@@ -748,15 +770,30 @@ const HomeScreen = () => {
                     style={styles.showCard}
                     onPress={() => handleLocalTilePress(tileData, index)}
                   >
-                    <Image 
-                      source={{ uri: item.imageUrl || FALLBACK_IMAGE_URL }} 
-                      style={styles.showImage}
-                      resizeMode="cover"
-                      alignSelf="flex-start"
-                    />
+                    <View style={styles.showImageContainer}>
+                      <View style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        overflow: 'hidden',
+                        borderTopLeftRadius: 12,
+                        borderTopRightRadius: 12,
+                      }}>
+                        <Image 
+                          source={{ uri: item.imageUrl || FALLBACK_IMAGE_URL }} 
+                          style={{
+                            width: '100%',
+                            height: '140%', // Make image taller than container
+                          }}
+                        />
+                      </View>
+                    </View>
                     <View style={styles.showInfo}>
                       <Text style={styles.showName} numberOfLines={2}>{item.title}</Text>
                       
+                      {/* Moved genres to the bottom */}
                       {item.genres && item.genres.length > 0 && (
                         <View style={styles.genreContainer}>
                           {item.genres.slice(0, 2).map((genre, idx) => (
@@ -766,24 +803,13 @@ const HomeScreen = () => {
                           ))}
                         </View>
                       )}
-                      
-                      <TouchableOpacity 
-                        style={styles.playButton}
-                        onPress={() => handleLocalTilePress(tileData, index)}
-                      >
-                        <Ionicons 
-                          name={isThisTilePlaying ? "pause" : "play"} 
-                          size={24} 
-                          color={BRAND_COLORS.primaryText} 
-                        />
-                      </TouchableOpacity>
                     </View>
                   </TouchableOpacity>
                 );
               }}
             />
-            </View>
-          )}
+          </View>
+        )}
         
         {/* Move arrows here, outside of carouselContainer but inside featuredSection */}
         {!isLoadingTiles && (
@@ -800,7 +826,7 @@ const HomeScreen = () => {
               }}
             >
               <Ionicons name="chevron-back" size={28} color={BRAND_COLORS.accent} />
-        </TouchableOpacity>
+            </TouchableOpacity>
 
             <TouchableOpacity 
               style={[styles.arrowButton, styles.rightArrow]}
@@ -817,8 +843,15 @@ const HomeScreen = () => {
             </TouchableOpacity>
           </>
         )}
+        
+        {/* Move pagination here, inside featuredSection */}
+        {!isLoadingTiles && tiles.length > 0 && (
+          <Pagination 
+            currentIndex={currentCarouselIndex} 
+            totalItems={tiles.length} 
+          />
+        )}
       </View>
-
       
       <Modal
         visible={showLiveStream}
@@ -851,6 +884,12 @@ const HomeScreen = () => {
               allowsInlineMediaPlayback={true}
               javaScriptEnabled={true}
               onMessage={handleWebViewMessage}
+              onLoadStart={() => setIsLiveStreamLoading(true)}
+              onLoad={() => setIsLiveStreamLoading(false)}
+              onLoadEnd={() => setIsLiveStreamLoading(false)}
+              onError={e => {
+                console.error('WebView error:', e.nativeEvent);
+              }}
               injectedJavaScript={`
                 (function() {
                   // Hide Mixcloud UI elements we don't need
@@ -992,7 +1031,7 @@ const HomeScreen = () => {
           />
         </SafeAreaView>
       </Modal>
-    </View>
+    </ScrollView>
   );
 };
 
@@ -1000,6 +1039,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: BRAND_COLORS.background,
+    paddingTop: Platform.OS === 'ios' ? Constants.statusBarHeight : 0,
+  },
+  contentContainer: {
+    // Content container for ScrollView
+    flexGrow: 1,
+    paddingBottom: 20, // Default bottom padding
   },
   
   // Action Buttons (Watch Live and Chat)
@@ -1123,20 +1168,16 @@ const styles = StyleSheet.create({
     right: 10, // 10 pixels from right screen edge
   },
   
-  // Featured Shows Section - Fixed positioning
+  // Featured Shows Section - Change from absolute positioning to normal flow
   featuredSection: {
-    position: 'absolute',
-    top: height * 0.45, // Position below the top banner
-    left: 0,
-    right: 0,
-    bottom: -10, // Position just above the tab bar
-    paddingBottom: 0,
-    borderBottomWidth: 0, // Ensure no border at bottom
+    position: 'relative', // For arrow button positioning
+    height: height * 0.45, // Fixed height instead of positioning
   },
   
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 30,
     fontWeight: 'bold',
+    textAlign: 'center',
     color: BRAND_COLORS.primaryText,
     marginHorizontal: 15,
     marginBottom: 10,
@@ -1144,14 +1185,14 @@ const styles = StyleSheet.create({
   
   carouselContainer: {
     flex: 1,
-    width: '100%', // Full width of screen
+    width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
   
   flatListStyle: {
-    width: CAROUSEL_TILE_WIDTH, // Exactly one tile width
+    width: CAROUSEL_TILE_WIDTH,
   },
   
   tilesCarouselContainer: {
@@ -1160,7 +1201,7 @@ const styles = StyleSheet.create({
   
   showCard: {
     width: CAROUSEL_TILE_WIDTH,
-    height: '95%', // Almost full height of container
+    height: '85%', // Almost full height of container
     backgroundColor: BRAND_COLORS.background === '#FFFFFF' ? '#F5F5F5' : '#1A1A1A',
     borderRadius: 12,
     shadowColor: '#000',
@@ -1176,12 +1217,13 @@ const styles = StyleSheet.create({
     borderColor: BRAND_COLORS.background === '#FFFFFF' ? '#EEEEEE' : '#333333',
   },
   
-  showImage: {
+  showImageContainer: {
     width: '100%',
     height: '60%',
     borderTopLeftRadius: 12,
     borderTopRightRadius: 12,
-    overflow: 'hidden'
+    overflow: 'hidden',
+    position: 'relative', // For absolute positioning of child
   },
   
   showInfo: {
@@ -1193,27 +1235,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: BRAND_COLORS.primaryText,
-    marginBottom: 6,
+    marginBottom: 20,
   },
   
   genreContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   
   genreTag: {
     backgroundColor: BRAND_COLORS.accent + '33',
     paddingHorizontal: 6,
     paddingVertical: 3,
-    borderRadius: 10,
+    borderRadius: 20,
     marginRight: 5,
-    marginBottom: 3,
   },
-  
   genreText: {
     color: BRAND_COLORS.primaryText,
-    fontSize: 10,
+    fontSize: 15,
   },
   
   playButton: {
@@ -1226,23 +1266,6 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  
-  // Tab Bar - Fixed at bottom
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: BRAND_COLORS.background,
-    height: Platform.OS === 'ios' ? 80 : 60,
-    paddingBottom: Platform.OS === 'ios' ? 25 : 10,
-    paddingTop: 15,
-    borderTopWidth: 0, // Remove the top border
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    zIndex: 999,
   },
   
   // Modal styles
@@ -1313,6 +1336,33 @@ const styles = StyleSheet.create({
     zIndex: 10,
     borderWidth: 2,
     borderColor: '#FFFFFF',
+  },
+  
+  paginationContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'absolute',
+    bottom: 30,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+  },
+  paginationDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginHorizontal: 4,
+  },
+  // Add a style for the loading container
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 10,
+    color: BRAND_COLORS.primaryText,
   },
 });
 

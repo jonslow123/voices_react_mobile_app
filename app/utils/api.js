@@ -40,19 +40,34 @@ secureApi.interceptors.response.use(
     return response;
   },
   async (error) => {
+    // Enhanced error logging to debug 500 errors
     console.log('❌ ERROR DETAILS:', {
       message: error.message,
       status: error.response?.status,
       statusText: error.response?.statusText,
       data: error.response?.data,
+      errorDetails: error.response?.data?.error || error.response?.data?.message || 'No error details',
+      stack: error.stack,
       headers: error?.response?.headers,
       config: {
         url: error.config?.url,
         method: error.config?.method,
         headers: error.config?.headers,
-        baseURL: error.config?.baseURL
+        baseURL: error.config?.baseURL,
+        data: error.config?.data,
       }
     });
+    
+    // Special handling for 500 errors
+    if (error.response?.status === 500) {
+      console.log('Server Error (500) occurred. Request details:', {
+        url: error.config?.url,
+        method: error.config?.method,
+        data: typeof error.config?.data === 'string' ? 
+          JSON.parse(error.config?.data) : 
+          error.config?.data,
+      });
+    }
     
     const originalRequest = error.config;
     

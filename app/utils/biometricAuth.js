@@ -3,6 +3,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const BIOMETRIC_AUTH_ENABLED_KEY = 'biometricAuthEnabled';
+export const BIOMETRIC_AUTH_ASKED_KEY = 'biometricAuthAsked';
 
 // Check if the device supports biometric authentication
 export const isBiometricAvailable = async () => {
@@ -91,9 +92,33 @@ export const authenticateWithBiometrics = async () => {
   }
 };
 
+// Add function to check if we've already asked about biometrics
+export const hasBiometricPromptBeenShown = async () => {
+  try {
+    const value = await AsyncStorage.getItem(BIOMETRIC_AUTH_ASKED_KEY);
+    return value === 'true';
+  } catch (error) {
+    console.error('Error checking if biometric prompt has been shown:', error);
+    return false;
+  }
+};
+
+// Add function to mark that we've asked about biometrics
+export const markBiometricPromptAsShown = async () => {
+  try {
+    await AsyncStorage.setItem(BIOMETRIC_AUTH_ASKED_KEY, 'true');
+    return true;
+  } catch (error) {
+    console.error('Error marking biometric prompt as shown:', error);
+    return false;
+  }
+};
+
 export default { 
   isBiometricAvailable, 
   setBiometricAuthEnabled, 
   getBiometricAuthEnabled,
-  authenticateWithBiometrics
+  authenticateWithBiometrics,
+  hasBiometricPromptBeenShown,
+  markBiometricPromptAsShown
 };

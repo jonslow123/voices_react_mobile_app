@@ -1,57 +1,45 @@
 {
-  "name": "voices-app",
   "expo": {
     "name": "Voices Radio",
-    "slug": "voices-app",
-    "entryPoint": "./index.js",
+    "slug": "VoicesRadio",
+    "scheme": "voicesradio",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/appicon.png",
-    "scheme": "voicesradio",
-    "userInterfaceStyle": "automatic",
+    "icon": "./assets/logo.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
     "splash": {
-      "image": "./assets/appicon.png",
+      "image": "./assets/logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#e5d7be"
+      "backgroundColor": "#ffffff"
     },
-    "updates": {
-      "fallbackToCacheTimeout": 0
-    },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.voicesradio.app",
-      "buildNumber": "1.0.0",
-      "associatedDomains": [
-        "applinks:auth.voicesradio.co.uk"
-      ],
-      "entitlements": {
-        "aps-environment": "development"
-      },
+      "bundleIdentifier": "com.voicesradio.voicesmobileapp",
       "infoPlist": {
-        "UIBackgroundModes": ["audio"],
-        "NSFaceIDUsageDescription": "This app may use Face ID to authenticate the user and auto-fill saved passwords."
-      },
-      "usesApnsToken": true
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": [
+          "audio"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/appicon.png",
-        "backgroundColor": "#e5d7be"
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#ffffff"
       },
-      "package": "com.voicesradio.app",
-      "versionCode": 1,
+      "package": "com.voicesradio.voicesmobileapp",
       "intentFilters": [
         {
           "action": "VIEW",
-          "autoVerify": true,
           "data": [
             {
-              "scheme": "https",
-              "host": "auth.voicesradio.co.uk",
-              "pathPrefix": "/verify-email"
+              "scheme": "voicesradio"
             }
           ],
           "category": [
@@ -59,35 +47,34 @@
             "DEFAULT"
           ]
         }
-      ],
-      "permissions": ["FOREGROUND_SERVICE"]
+      ]
     },
     "web": {
-      "bundler": "metro",
-      "output": "static",
-      "favicon": "./assets/appicon.png"
+      "favicon": "./assets/logo.png"
     },
-    "experiments": {
-      "typedRoutes": true
-    },
-    "newArchEnabled": true,
     "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-secure-store",
       [
-        "expo-notifications",
+        "expo-av",
         {
-          "icon": "./assets/appicon.png",
-          "color": "#ffffff",
-          "sounds": [
-            "./assets/voices_notification.mp3"
-          ]
+          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone."
         }
-      ]
+      ],
+      "expo-audio"
     ],
-    "owner": "jonslow10",
+    "owner": "voices-radio",
     "extra": {
+      "router": {
+        "origin": false
+      },
       "eas": {
-        "projectId": "08fa2afe-af78-4e89-9035-d4d155cdfb66"
+        "projectId": "9d814c4b-4081-40a1-a508-40eeaa620849"
       }
+    },
+    "navigationBar": {
+      "backgroundColor": "#121212"
     }
   }
 }

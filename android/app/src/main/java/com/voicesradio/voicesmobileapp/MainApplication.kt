@@ -1,4 +1,4 @@
-package com.voicesradio.app
+package com.voicesradio.voicesmobileapp
 
 import android.app.Application
 import android.content.res.Configuration
