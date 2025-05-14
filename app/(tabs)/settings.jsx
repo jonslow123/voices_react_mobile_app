@@ -820,19 +820,6 @@ export default function SettingsScreen() {
           </View>
         </CollapsibleSection>
         
-        {/* About Section */}
-        <CollapsibleSection title="About">
-          <View style={styles.accountContainer}>
-            <TouchableOpacity 
-              style={[styles.actionButton, styles.lastActionButton]}
-              onPress={() => router.push('/about')}
-            >
-              <Ionicons name="information-circle-outline" size={20} color={BRAND_COLORS.black} />
-              <Text style={styles.actionButtonText}>About Voices Radio</Text>
-              <Ionicons name="chevron-forward" size={20} color={BRAND_COLORS.black} />
-            </TouchableOpacity>
-          </View>
-        </CollapsibleSection>
         
         {/* Admin Section 
         <CollapsibleSection title="Admin">
@@ -981,6 +968,18 @@ export default function SettingsScreen() {
             >
               <Ionicons name="mail-outline" size={20} color={BRAND_COLORS.black} />
               <Text style={styles.actionButtonText}>Send Feedback</Text>
+              <Ionicons name="chevron-forward" size={20} color={BRAND_COLORS.black} />
+            </TouchableOpacity>
+          </View>
+        </CollapsibleSection>
+        <CollapsibleSection title="About">
+          <View style={styles.accountContainer}>
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.lastActionButton]}
+              onPress={() => router.push('/about')}
+            >
+              <Ionicons name="information-circle-outline" size={20} color={BRAND_COLORS.black} />
+              <Text style={styles.actionButtonText}>About Voices Radio</Text>
               <Ionicons name="chevron-forward" size={20} color={BRAND_COLORS.black} />
             </TouchableOpacity>
           </View>

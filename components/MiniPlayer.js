@@ -17,6 +17,7 @@ import { BRAND_COLORS } from '../app/styles/brandColors';
 import SoundCloudLogo from '../assets/soundcloud_logo_black.png';
 import MixcloudLogo from '../assets/mixcloud_logo.svg';
 import { usePathname } from 'expo-router';
+import SoundCloudPlayer from './SoundCloudPlayer';
 
 const MiniPlayer = () => {
   const { 
@@ -52,6 +53,7 @@ const MiniPlayer = () => {
   const [containerWidth, setContainerWidth] = useState(0);
   const animationRef = useRef(null);
   const [webViewLoading, setWebViewLoading] = useState(true);
+  const soundCloudPlayerRef = useRef(null);
   
   // Get title for header display
   const title = currentTrack?.name || currentTrack?.title || 'Now Playing';
@@ -142,15 +144,115 @@ const MiniPlayer = () => {
         .catch(error => console.log('Preload error:', error));
     }
   }, [currentPlayingUrl]);
+
+  // Extract SoundCloud track ID from URL
+  const extractSoundCloudTrackId = (url) => {
+    if (!url || !url.includes('soundcloud.com')) return null;
+    
+    // For direct track URLs like https://soundcloud.com/username/track-name
+    // This format returns the username/track-name format which works better with the widget
+    const fullPathMatch = url.match(/soundcloud\.com\/([^\/]+\/[^\/\?]+)/);
+    if (fullPathMatch && fullPathMatch[1]) {
+      return fullPathMatch[1];
+    }
+    
+    // For player URLs with track IDs
+    const idMatch = url.match(/tracks\/(\d+)/);
+    if (idMatch && idMatch[1]) {
+      return idMatch[1];
+    }
+    
+    return null;
+  };
+  
+  // Handle SoundCloud player events
+  const handleSoundCloudPlay = () => {
+    handleWebViewPlayStateChange(true);
+  };
+  
+  const handleSoundCloudPause = () => {
+    handleWebViewPlayStateChange(false);
+  };
+  
+  const handleSoundCloudEnded = () => {
+    handleWebViewPlayStateChange(false);
+  };
+  
+  // Handle SoundCloud player errors
+  const handleSoundCloudError = (error) => {
+    console.error('SoundCloud player error:', error);
+    // You could add more error handling here if needed
+  };
   
   // JavaScript to inject into the WebView to monitor play/pause events
   const injectedJavaScript = `
     (function() {
-      // Create a more efficient interface
-      window.MixcloudPlayer = {
+      // Create a more efficient interface for both players
+      window.PlayerInterface = {
         isPlaying: false,
         
         setupListeners: function() {
+          // Check if this is SoundCloud or Mixcloud
+          const isSoundCloud = window.location.href.includes('soundcloud.com');
+          
+          if (isSoundCloud) {
+            // SoundCloud player setup
+            this.setupSoundCloudListeners();
+          } else {
+            // Mixcloud player setup (existing code)
+            this.setupMixcloudListeners();
+          }
+        },
+        
+        setupSoundCloudListeners: function() {
+          // Wait for SoundCloud widget API to be available
+          const checkForWidget = setInterval(() => {
+            if (window.SC && window.SC.Widget) {
+              clearInterval(checkForWidget);
+              
+              try {
+                // Get the iframe element
+                const iframeElement = document.querySelector('iframe');
+                if (!iframeElement) {
+                  console.error('SoundCloud iframe not found');
+                  return;
+                }
+                
+                // Initialize the widget
+                const widget = SC.Widget(iframeElement);
+                
+                // Set up event listeners
+                widget.bind(SC.Widget.Events.PLAY, () => {
+                  this.isPlaying = true;
+                  this.sendState();
+                });
+                
+                widget.bind(SC.Widget.Events.PAUSE, () => {
+                  this.isPlaying = false;
+                  this.sendState();
+                });
+                
+                widget.bind(SC.Widget.Events.FINISH, () => {
+                  this.isPlaying = false;
+                  this.sendState();
+                });
+                
+                // Store widget reference for play/pause controls
+                window.scWidget = widget;
+                
+                // Get initial state
+                widget.isPaused((isPaused) => {
+                  this.isPlaying = !isPaused;
+                  this.sendState();
+                });
+              } catch (e) {
+                console.error('Error setting up SoundCloud widget:', e);
+              }
+            }
+          }, 500);
+        },
+        
+        setupMixcloudListeners: function() {
           // More efficient event listeners with throttling
           const playPauseButton = document.querySelector('.play-button, .player-control');
           if (playPauseButton) {
@@ -184,27 +286,39 @@ const MiniPlayer = () => {
         },
         
         play: function() {
-          const button = document.querySelector('.play-button, .player-control');
-          if (button && !this.isPlaying) button.click();
+          const isSoundCloud = window.location.href.includes('soundcloud.com');
+          
+          if (isSoundCloud && window.scWidget) {
+            window.scWidget.play();
+          } else {
+            const button = document.querySelector('.play-button, .player-control');
+            if (button && !this.isPlaying) button.click();
+          }
         },
         
         pause: function() {
-          const button = document.querySelector('.play-button, .player-control');
-          if (button && this.isPlaying) button.click();
+          const isSoundCloud = window.location.href.includes('soundcloud.com');
+          
+          if (isSoundCloud && window.scWidget) {
+            window.scWidget.pause();
+          } else {
+            const button = document.querySelector('.play-button, .player-control');
+            if (button && this.isPlaying) button.click();
+          }
         }
       };
       
       // Initialize when player is ready
       document.addEventListener('DOMContentLoaded', () => {
         // Wait a bit for the player to fully initialize
-        setTimeout(() => window.MixcloudPlayer.setupListeners(), 1000);
+        setTimeout(() => window.PlayerInterface.setupListeners(), 1000);
       });
       
       // Handle messages from React Native
       window.addEventListener('message', (event) => {
         const command = event.data;
-        if (command === 'play') window.MixcloudPlayer.play();
-        else if (command === 'pause') window.MixcloudPlayer.pause();
+        if (command === 'play') window.PlayerInterface.play();
+        else if (command === 'pause') window.PlayerInterface.pause();
       });
     })();
   `;
@@ -221,9 +335,45 @@ const MiniPlayer = () => {
     }
   };
   
+  // Effect to sync refs between components
+  useEffect(() => {
+    if (currentSource === 'soundcloud' && soundCloudPlayerRef.current) {
+      // Expose SoundCloudPlayer methods to webViewRef for consistent API
+      webViewRef.current = {
+        injectJavaScript: (script) => {
+          try {
+            if (script.includes('play')) {
+              soundCloudPlayerRef.current.play();
+            } else if (script.includes('pause')) {
+              soundCloudPlayerRef.current.pause();
+            } else if (script.includes('toggle')) {
+              soundCloudPlayerRef.current.toggle();
+            }
+          } catch (error) {
+            console.error('Error calling SoundCloud player method:', error);
+          }
+          return true;
+        }
+      };
+    }
+  }, [currentSource, soundCloudPlayerRef.current]);
+  
   if (!miniPlayerVisible || !currentTrack) {
     return null;
   }
+  
+  // Extract track ID for SoundCloud
+  const soundCloudTrackId = currentSource === 'soundcloud' ? 
+    currentTrack.soundcloudId || extractSoundCloudTrackId(currentTrack.soundcloudUrl || currentPlayingUrl) : 
+    null;
+  
+  console.log('MiniPlayer Debug:', { 
+    currentSource, 
+    soundCloudTrackId,
+    trackId: currentTrack.soundcloudId,
+    trackUrl: currentTrack.soundcloudUrl,
+    currentPlayingUrl
+  });
   
   return (
     <View style={[
@@ -305,11 +455,29 @@ const MiniPlayer = () => {
         {/* Source indicator */}
         <Text style={styles.sourceText}>Live Radio Stream</Text>
       </View>
+    ) : currentSource === 'soundcloud' ? (
+      // SoundCloud Stream - Use SoundCloudPlayer component
+      <View style={styles.soundCloudContainer}>
+        <SoundCloudPlayer
+          ref={soundCloudPlayerRef}
+          trackId={currentTrack.soundcloudId || soundCloudTrackId || ''}
+          onReady={() => setWebViewLoading(false)}
+          onPlay={handleSoundCloudPlay}
+          onPause={handleSoundCloudPause}
+          onEnded={handleSoundCloudEnded}
+          onError={handleSoundCloudError}
+        />
+      </View>
     ) : (
       // Mixcloud Stream - Show WebView
       <WebView
         ref={webViewRef}
-        source={{ uri: currentPlayingUrl }}
+        source={{ 
+          uri: currentPlayingUrl,
+          headers: {
+            'Referer': 'https://voicesradio.co.uk/'
+          }
+        }}
         style={{ height: 65, backgroundColor: BRAND_COLORS.background, marginBottom: 0 }}
         onError={e => {
           console.error('WebView error:', e.nativeEvent);
@@ -407,6 +575,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: BRAND_COLORS.secondaryText || '#999',
   },
+  soundCloudContainer: {
+    height: 80,
+    backgroundColor: BRAND_COLORS.background,
+  }
 });
 
 export default MiniPlayer;

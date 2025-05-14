@@ -204,7 +204,6 @@ const HomeScreen = () => {
       }
       
       const data = await response.json();
-      console.log("Live info API response:", JSON.stringify(data, null, 2));
         setLiveInfo(data);
       
       // Extract show information

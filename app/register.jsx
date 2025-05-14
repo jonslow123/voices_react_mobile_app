@@ -448,10 +448,12 @@ export default function RegisterScreen() {
   useEffect(() => {
     // Initialize Google Sign-In for native apps
     if (!isExpoGo) {
+      console.log("Configuring Google Sign-In");
       GoogleSignin.configure({
         webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
         offlineAccess: true,
         iosClientId: '10790134127-c30c7cna9g83h8e02u1lnl26epdtaknj.apps.googleusercontent.com',
+        forceCodeForRefreshToken: true,
       });
     }
   }, []);
@@ -459,10 +461,16 @@ export default function RegisterScreen() {
   // Google Sign-In handler
   const handleGoogleSignIn = async () => {
     try {
+      console.log("Starting Google Sign-In process");
       setIsGoogleLoading(true);
       
-      await GoogleSignin.hasPlayServices();
+      // Check if Play Services are available (for Android)
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      
+      // Attempt the sign-in
+      console.log("Calling GoogleSignin.signIn()");
       const userInfo = await GoogleSignin.signIn();
+      console.log("Google Sign-In success:", userInfo.user.email);
       
       // Set form fields from user info
       if (userInfo.user.email) setEmail(userInfo.user.email);
@@ -476,7 +484,29 @@ export default function RegisterScreen() {
       );
     } catch (error) {
       console.error("Google sign in error:", error);
-      Alert.alert("Error", "Failed to sign in with Google. Please try again.");
+      
+      // Detailed error handling
+      let errorMessage = "Failed to sign in with Google. Please try again.";
+      if (error.code) {
+        switch (error.code) {
+          case statusCodes.SIGN_IN_CANCELLED:
+            errorMessage = "Sign-in canceled";
+            break;
+          case statusCodes.IN_PROGRESS:
+            errorMessage = "Sign-in is already in progress";
+            break;
+          case statusCodes.PLAY_SERVICES_NOT_AVAILABLE:
+            errorMessage = "Play Services are not available";
+            break;
+          default:
+            errorMessage = `Error: ${error.message || error.toString()}`;
+        }
+      }
+      
+      // Only show alert if it wasn't user cancellation
+      if (error.code !== statusCodes.SIGN_IN_CANCELLED) {
+        Alert.alert("Error", errorMessage);
+      }
     } finally {
       setIsGoogleLoading(false);
     }

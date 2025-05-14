@@ -181,8 +181,32 @@ export function PlayerContextProvider({ children }) {
     }
   };
 
+  // Extract SoundCloud track ID from URL
+  const extractSoundCloudTrackId = (url) => {
+    if (!url || !url.includes('soundcloud.com')) return null;
+    
+    // For direct track URLs like https://soundcloud.com/username/track-name
+    // Return the full path after soundcloud.com/ which works better with the widget
+    const fullPathMatch = url.match(/soundcloud\.com\/([^\/]+\/[^\/\?]+)/);
+    if (fullPathMatch && fullPathMatch[1]) {
+      console.log('Extracted full path from URL:', fullPathMatch[1]);
+      return fullPathMatch[1];
+    }
+    
+    // For player URLs with track IDs
+    const idMatch = url.match(/tracks\/(\d+)/);
+    if (idMatch && idMatch[1]) {
+      console.log('Extracted numeric ID from URL:', idMatch[1]);
+      return idMatch[1];
+    }
+    
+    return null;
+  };
+
   // Function to handle tile press from any screen
   const handleTilePress = (tileData) => {
+    console.log('Tile pressed:', tileData);
+    
     // First, stop any Airtime stream that might be playing
     if (isHeaderPlaying || isAirtimeStream) {
       // Stop the Airtime stream explicitly
@@ -213,20 +237,88 @@ export function PlayerContextProvider({ children }) {
     }
     
     // Now update with new track data
-    setCurrentTrack(tileData);
-    setCurrentPlayingUrl(tileData.iframeUrl || tileData.streamUrl);
-    setMiniPlayerVisible(true);
+    const updatedTileData = { ...tileData };
     
-    // Set the source based on the tileData
-    if (tileData.source) {
-      setCurrentSource(tileData.source);
-    } else if (tileData.iframeUrl && tileData.iframeUrl.includes('mixcloud.com')) {
-      setCurrentSource('mixcloud');
+    // Set the active tile ID for UI updates
+    setActiveTileId(tileData._id || tileData.key);
+    
+    // Determine the source and format the URL properly
+    let source = '';
+    let playingUrl = '';
+    
+    // Check for SoundCloud URLs
+    if (tileData.soundcloudUrl && tileData.soundcloudUrl.includes('soundcloud.com')) {
+      source = 'soundcloud';
+      playingUrl = tileData.soundcloudUrl;
+      
+      // Extract soundcloudId if not already present
+      if (!updatedTileData.soundcloudId) {
+        // First try to extract from URL params
+        const trackIdInUrl = tileData.soundcloudUrl.match(/tracks[\/=](\d+)/i);
+        if (trackIdInUrl && trackIdInUrl[1]) {
+          updatedTileData.soundcloudId = trackIdInUrl[1];
+          console.log('Extracted numeric ID from URL parameters:', updatedTileData.soundcloudId);
+        } else {
+          // Then try our pattern matcher
+          updatedTileData.soundcloudId = extractSoundCloudTrackId(tileData.soundcloudUrl);
+          console.log('Extracted SoundCloud ID from URL pattern:', updatedTileData.soundcloudId);
+        }
+      }
     } else if (tileData.iframeUrl && tileData.iframeUrl.includes('soundcloud.com')) {
-      setCurrentSource('soundcloud');
+      source = 'soundcloud';
+      playingUrl = tileData.iframeUrl;
+      
+      // Extract soundcloudId if not already present
+      if (!updatedTileData.soundcloudId) {
+        const trackIdInUrl = tileData.iframeUrl.match(/tracks[\/=](\d+)/i);
+        if (trackIdInUrl && trackIdInUrl[1]) {
+          updatedTileData.soundcloudId = trackIdInUrl[1];
+          console.log('Extracted numeric ID from iframe URL:', updatedTileData.soundcloudId);
+        } else {
+          updatedTileData.soundcloudId = extractSoundCloudTrackId(tileData.iframeUrl);
+          console.log('Extracted SoundCloud ID from iframe URL pattern:', updatedTileData.soundcloudId);
+        }
+      }
+    } else if (tileData.mixcloudUrl || (tileData.iframeUrl && tileData.iframeUrl.includes('mixcloud.com'))) {
+      source = 'mixcloud';
+      playingUrl = tileData.iframeUrl || tileData.mixcloudUrl;
     } else {
-      setCurrentSource(null);
+      // Default to whatever URL is available
+      playingUrl = tileData.iframeUrl || tileData.streamUrl;
+      
+      // Try to determine source from URL
+      if (playingUrl) {
+        if (playingUrl.includes('soundcloud.com')) {
+          source = 'soundcloud';
+          
+          // Extract soundcloudId if not already present
+          if (!updatedTileData.soundcloudId) {
+            const trackIdInUrl = playingUrl.match(/tracks[\/=](\d+)/i);
+            if (trackIdInUrl && trackIdInUrl[1]) {
+              updatedTileData.soundcloudId = trackIdInUrl[1];
+              console.log('Extracted numeric ID from playingUrl params:', updatedTileData.soundcloudId);
+            } else {
+              updatedTileData.soundcloudId = extractSoundCloudTrackId(playingUrl);
+              console.log('Extracted SoundCloud ID from playingUrl pattern:', updatedTileData.soundcloudId);
+            }
+          }
+        } else if (playingUrl.includes('mixcloud.com')) {
+          source = 'mixcloud';
+        }
+      }
     }
+    
+    console.log('Player data:', {
+      source,
+      playingUrl,
+      soundcloudId: updatedTileData.soundcloudId,
+      tileDataId: tileData.soundcloudId
+    });
+    
+    setCurrentTrack(updatedTileData);
+    setCurrentPlayingUrl(playingUrl);
+    setCurrentSource(source);
+    setMiniPlayerVisible(true);
   };
 
   // Toggle play/pause state
@@ -234,15 +326,25 @@ export function PlayerContextProvider({ children }) {
     if (isAirtimeStream) {
       toggleAirtimePlayback();
     } else {
-      // Handle normal Mixcloud playback
+      // Handle WebView players (Mixcloud or SoundCloud)
       if (webViewRef.current) {
         const command = isPlaying ? 'pause' : 'play';
-        webViewRef.current.injectJavaScript(`
-          if (window.MixcloudPlayer && typeof window.MixcloudPlayer.${command} === 'function') { 
-            window.MixcloudPlayer.${command}();
-          }
-          true;
-        `);
+        
+        if (currentSource === 'soundcloud') {
+          webViewRef.current.injectJavaScript(`
+            if (window.scWidget && typeof window.scWidget.${command} === 'function') { 
+              window.scWidget.${command}();
+            }
+            true;
+          `);
+        } else {
+          webViewRef.current.injectJavaScript(`
+            if (window.PlayerInterface && typeof window.PlayerInterface.${command} === 'function') { 
+              window.PlayerInterface.${command}();
+            }
+            true;
+          `);
+        }
       }
     }
   };
@@ -299,14 +401,23 @@ export function PlayerContextProvider({ children }) {
         }
       }
       
-      // For Mixcloud tracks
+      // For WebView players (Mixcloud or SoundCloud)
       if (webViewRef.current && !isAirtimeStream) {
-        webViewRef.current.injectJavaScript(`
-          if (window.MixcloudPlayer && typeof window.MixcloudPlayer.pause === 'function') { 
-            window.MixcloudPlayer.pause();
-          }
-          true;
-        `);
+        if (currentSource === 'soundcloud') {
+          webViewRef.current.injectJavaScript(`
+            if (window.scWidget && typeof window.scWidget.pause === 'function') { 
+              window.scWidget.pause();
+            }
+            true;
+          `);
+        } else {
+          webViewRef.current.injectJavaScript(`
+            if (window.PlayerInterface && typeof window.PlayerInterface.pause === 'function') { 
+              window.PlayerInterface.pause();
+            }
+            true;
+          `);
+        }
       }
       
       // Reset player state

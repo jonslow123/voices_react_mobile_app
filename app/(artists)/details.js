@@ -148,13 +148,17 @@ const ArtistDetailsScreen = () => {
         try {
           const parsedShows = JSON.parse(showsData);
           const formattedShows = parsedShows.map(show => ({
-            key: show.mixcloudKey,
+            key: show.mixcloudKey || `sc-${show.soundcloudId}` || `show-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
             name: show.title,
             pictures: { 
               extra_large: show.imageUrl 
             },
             created_time: show.date,
-            genres: show.genres || []
+            genres: show.genres || [],
+            mixcloudKey: show.mixcloudKey,
+            mixcloudUrl: show.mixcloudUrl,
+            soundcloudUrl: show.soundcloudUrl,
+            soundcloudId: show.soundcloudId
           }));
           
           setShows(formattedShows);
@@ -174,13 +178,17 @@ const ArtistDetailsScreen = () => {
           
           if (response.data && response.data.shows) {
             const formattedShows = response.data.shows.map(show => ({
-              key: show.mixcloudKey,
+              key: show.mixcloudKey || `sc-${show.soundcloudId}` || `show-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
               name: show.title,
               pictures: { 
                 extra_large: show.imageUrl 
               },
               created_time: show.date,
-              genres: show.genres || []
+              genres: show.genres || [],
+              mixcloudKey: show.mixcloudKey,
+              mixcloudUrl: show.mixcloudUrl,
+              soundcloudUrl: show.soundcloudUrl,
+              soundcloudId: show.soundcloudId
             }));
             
             setShows(formattedShows);
@@ -203,13 +211,17 @@ const ArtistDetailsScreen = () => {
             
             if (artist.shows && artist.shows.length > 0) {
               const formattedShows = artist.shows.map(show => ({
-                key: show.mixcloudKey,
+                key: show.mixcloudKey || `sc-${show.soundcloudId}` || `show-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
                 name: show.title,
                 pictures: { 
                   extra_large: show.imageUrl 
                 },
                 created_time: show.date,
-                genres: show.genres || []
+                genres: show.genres || [],
+                mixcloudKey: show.mixcloudKey,
+                mixcloudUrl: show.mixcloudUrl,
+                soundcloudUrl: show.soundcloudUrl,
+                soundcloudId: show.soundcloudId
               }));
               
               setShows(formattedShows);
@@ -423,6 +435,25 @@ const ArtistDetailsScreen = () => {
     }
   };
 
+  // Extract SoundCloud track ID from URL
+  const extractSoundCloudTrackId = (url) => {
+    if (!url || !url.includes('soundcloud.com')) return null;
+    
+    // For direct track URLs like https://soundcloud.com/username/track-name
+    const trackMatch = url.match(/soundcloud\.com\/[^\/]+\/([^\/\?]+)/);
+    if (trackMatch && trackMatch[1]) {
+      return trackMatch[1];
+    }
+    
+    // For player URLs with track IDs
+    const idMatch = url.match(/tracks\/(\d+)/);
+    if (idMatch && idMatch[1]) {
+      return idMatch[1];
+    }
+    
+    return null;
+  };
+
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
@@ -442,6 +473,8 @@ const ArtistDetailsScreen = () => {
 
   // New function that wraps the handleTilePress from context
   const handleShowTilePress = (tileData, index) => {
+    console.log('Show tile pressed:', tileData);
+    
     if (activeTileId === tileData._id && isPlaying) {
       // If this is the active tile and it's playing, pause it
       togglePlayback();
@@ -460,6 +493,13 @@ const ArtistDetailsScreen = () => {
       setCurrentPlayingKey(null);
     }
   }, [activeTileId, isPlaying]);
+
+  // Debug shows data
+  useEffect(() => {
+    if (shows.length > 0) {
+      console.log('Shows data sample:', shows[0]);
+    }
+  }, [shows]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -563,15 +603,34 @@ const ArtistDetailsScreen = () => {
         ) : (
           <View style={styles.showsList}>
             {shows.map((show, index) => {
+              // Extract SoundCloud ID if available in URL
+              let soundcloudId = show.soundcloudId;
+              if (!soundcloudId && show.soundcloudUrl) {
+                soundcloudId = extractSoundCloudTrackId(show.soundcloudUrl);
+              }
+              
               // Transform show data to match the format expected by handleTilePress
               const tileData = {
                 _id: show.key,
                 title: show.name,
                 imageUrl: show.pictures.extra_large,
                 key: show.key,
-                iframeUrl: `https://player-widget.mixcloud.com/widget/iframe/?hide_cover=1&mini=1&light=1&feed=${encodeURIComponent(show.key)}`,
-                source: 'mixcloud'
+                // Use appropriate URLs based on what's available
+                mixcloudUrl: show.mixcloudUrl,
+                soundcloudUrl: show.soundcloudUrl,
+                iframeUrl: show.mixcloudKey ? 
+                  `https://player-widget.mixcloud.com/widget/iframe/?hide_cover=1&mini=1&light=1&feed=${encodeURIComponent(show.mixcloudKey)}` : 
+                  null,
+                source: show.soundcloudUrl ? 'soundcloud' : 'mixcloud',
+                soundcloudId: soundcloudId
               };
+
+              console.log(`Show ${index} data:`, {
+                key: show.key,
+                soundcloudUrl: show.soundcloudUrl,
+                soundcloudId: soundcloudId,
+                source: tileData.source
+              });
 
               // Check if this tile is the currently playing one
               const isThisTilePlaying = activeTileId === show.key && isPlaying;
